@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <link rel="stylesheet" href="style.css">
+
+  <style>
+    body, html { 
+        height: 100vh; 
+        margin: 0; 
+        padding: 0; 
+        overflow: hidden; 
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        display: flex;
+        flex-direction: column;
+        background-color: #3d3d3d;
+    }
+    
+    #topContainer {
+        display: flex;
+        flex: 1;
+        min-height: 50%;
+        gap: 4px;
+        padding: 4px 4px 2px 4px;
+        box-sizing: border-box;
+    }
+
+    #robot1UI, #robot2UI {
+        flex-basis: 100px;
+        flex-shrink: 0;
+        padding: 10px;
+        background: #f0f0f0;
+        border-radius: 4px;
+        overflow-y: auto;
+    }
+    #centerPane {
+        flex-grow: 1;
+        background: #000;
+        border-radius: 4px;
+        overflow: hidden;
+    }
+    #centerPane iframe { width: 100%; height: 100%; border: none; }
+    
+    #bottomContainer {
+        display: flex;
+        height: 30%;
+        gap: 4px;
+        padding: 2px 4px 4px 4px;
+        box-sizing: border-box;
+    }
+
+    #pane1, #pane3 {
+        flex: 1 1 auto;
+        position: relative;
+        background: #000;
+        border-radius: 4px;
+        overflow: hidden;
+    }
+    #pane2 {
+        flex: 0 1 auto;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        background: #000;
+        border-radius: 4px;
+    }
+
+    #aruco_feed { max-width: 100%; max-height: 100%; object-fit: contain; }
+    canvas { display: block; width: 100%; height: 100%; }
+    .robot-control-panel h4, .robot-control-panel h5 { margin-top: 15px; margin-bottom: 5px; border-bottom: 1px solid #ddd; padding-bottom: 5px; }
+    .robot-control-panel h4:first-child { margin-top: 0; }
+    .debug-output { font-family: monospace; font-size: 11px; white-space: pre-wrap; word-wrap: break-word; }
+  </style>
+</head>
+<body>
+  <div id="topContainer">
+    <div id="robot1UI">
+        <div class="robot-control-panel">
+          <h4>Robot 1</h4>
+          <p>Status: <span id="status1">Waiting...</span></p>
+          <button id="zeroBtn1">Zero Robot</button>
+          <h5>Joint Angles:</h5>
+          <div id="jointAngles1" class="debug-output"></div>
+          <h5>Target Pose:</h5>
+          <div id="poseDebug1" class="debug-output"></div>
+        </div>
+    </div>
+    <div id="centerPane">
+        <iframe src="webrtc.html" frameborder="0"></iframe>
+    </div>
+    <div id="robot2UI">
+        <div class="robot-control-panel">
+          <h4>Robot 2</h4>
+          <p>Status: <span id="status2">Waiting...</span></p>
+          <button id="zeroBtn2">Zero Robot</button>
+          <h5>Joint Angles:</h5>
+          <div id="jointAngles2" class="debug-output"></div>
+          <h5>Target Pose:</h5>
+          <div id="poseDebug2" class="debug-output"></div>
+        </div>
+    </div>
+  </div>
+  
+  <div id="bottomContainer">
+    <div id="pane1"><canvas id="mainThreejsView"></canvas></div>
+    <div id="pane2"><img id="aruco_feed"></div>
+    <div id="pane3"><canvas id="secondView"></canvas></div>
+  </div>
+  
+  <script>
+    const ui = {
+        1: { joints: document.getElementById("jointAngles1"), status: document.getElementById("status1"), pose: document.getElementById("poseDebug1") },
+        2: { joints: document.getElementById("jointAngles2"), status: document.getElementById("status2"), pose: document.getElementById("poseDebug2") }
+    };
+    
+    let scene, r1_view, r2_view;
+    let robotGroup1, robotGroup2;
+    let robot1Joints = [0,0,0,0,0,0], robot2Joints = [0,0,0,0,0,0];
+
+    // *** OPTIMIZATION: State variables to hold the latest data from Python ***
+    // This allows us to decouple data arrival from rendering updates.
+    let robot1UpdateData = null;
+    let robot2UpdateData = null;
+
+    const R1_MAT = new THREE.MeshLambertMaterial({color: 0x6688ff});
+    const R2_MAT = new THREE.MeshLambertMaterial({color: 0xff6666});
+    const LINK_MAT = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 });
+
+    function createRobotGroup(jointMaterial) {
+        const group = new THREE.Group();
+        for (let i = 0; i < 8; i++) { group.add(new THREE.Mesh(new THREE.SphereGeometry(2.5), jointMaterial)); }
+        const lineGeometry = new THREE.BufferGeometry();
+        lineGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(8 * 3), 3));
+        group.add(new THREE.Line(lineGeometry, LINK_MAT));
+        return group;
+    }
+    
+    function setupView(canvasId, isPerspective) {
+        const pane = document.getElementById(canvasId).parentElement;
+        const renderer = new THREE.WebGLRenderer({antialias: true, canvas: document.getElementById(canvasId)});
+        renderer.setSize(pane.clientWidth, pane.clientHeight);
+        
+        const aspect = pane.clientWidth / pane.clientHeight;
+        let camera;
+        if (isPerspective) {
+            camera = new THREE.PerspectiveCamera(65, aspect, 0.1, 2000);
+            camera.position.set(0, -100, 80);
+        } else {
+            camera = new THREE.OrthographicCamera(-50 * aspect, 50 * aspect, 70, -30, -100, 500);
+            camera.position.set(0, 0, 100);
+        }
+        camera.lookAt(0,0,0);
+        
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        return { renderer, camera, controls };
+    }
+
+    function init(){
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x222222);
+        scene.add(new THREE.GridHelper(200, 20));
+        scene.add(new THREE.AxesHelper(50));
+        scene.add(new THREE.AmbientLight(0x404040));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
+        dirLight.position.set(50, -200, 100);
+        scene.add(dirLight);
+
+        robotGroup1 = createRobotGroup(R1_MAT); scene.add(robotGroup1);
+        robotGroup2 = createRobotGroup(R2_MAT); scene.add(robotGroup2);
+
+        r1_view = setupView('mainThreejsView', true);
+        r2_view = setupView('secondView', false);
+        
+        onWindowResize();
+        animate();
+        
+        if (window.pywebview) {
+            // *** OPTIMIZATION: The response from Python will now be handled in the animation loop ***
+            window.pywebview.api.go_to_zero_robot1().then(res => handle_robot_update(1, res));
+            window.pywebview.api.go_to_zero_robot2().then(res => handle_robot_update(2, res));
+        }
+    }
+
+    function updateRobot(grp, positions){
+        if (!positions || positions.length < 1) return;
+        const line = grp.children.find(c => c.type === 'Line');
+        if(!line) return;
+        const points = line.geometry.attributes.position.array;
+        
+        for (let i = 0; i < positions.length; i++) {
+            const pos = positions[i];
+            if(i < (grp.children.length -1)) {
+                grp.children[i].position.set(pos[0], pos[1], pos[2]);
+            }
+            points[i * 3] = pos[0];
+            points[i * 3 + 1] = pos[1];
+            points[i * 3 + 2] = pos[2];
+        }
+        line.geometry.setDrawRange(0, positions.length);
+        line.geometry.attributes.position.needsUpdate = true;
+    }
+
+    // *** OPTIMIZATION: Switched to requestAnimationFrame for all rendering and DOM updates ***
+    // This ensures updates are synchronized with the browser's repaint cycle, leading to much smoother visuals.
+    function animate(){
+        requestAnimationFrame(animate);
+
+        // Check if there is pending update data for Robot 1 and apply it
+        if (robot1UpdateData) {
+            apply_robot_update(1, robot1UpdateData);
+            robot1UpdateData = null; // Consume the data to prevent re-rendering
+        }
+        // Check if there is pending update data for Robot 2 and apply it
+        if (robot2UpdateData) {
+            apply_robot_update(2, robot2UpdateData);
+            robot2UpdateData = null; // Consume the data
+        }
+
+        r1_view.controls.update();
+        r1_view.renderer.render(scene, r1_view.camera);
+        r2_view.controls.update();
+        r2_view.renderer.render(scene, r2_view.camera);
+    }
+
+    // *** OPTIMIZATION: This function is called from Python and just stores the latest data ***
+    function handle_robot_update(robotId, data) {
+        if (robotId === 1) {
+            robot1UpdateData = data;
+        } else {
+            robot2UpdateData = data;
+        }
+    }
+
+    // *** OPTIMIZATION: This new function contains the original update logic ***
+    // It's now called from within the animation loop to ensure smooth rendering.
+    function apply_robot_update(robotId, data) {
+        const positions_key = `positions${robotId}` in data ? `positions${robotId}` : 'positions';
+        const angles_key = `joint_angles${robotId}` in data ? `joint_angles${robotId}` : 'joint_angles';
+
+        if (data && data[positions_key]) {
+            const robotGroup = (robotId === 1) ? robotGroup1 : robotGroup2;
+            const jointAngles = data[angles_key];
+            
+            updateRobot(robotGroup, data[positions_key]);
+            
+            if (ui[robotId] && jointAngles) {
+                if (robotId === 1) robot1Joints = jointAngles;
+                else robot2Joints = jointAngles;
+                
+                ui[robotId].joints.innerHTML = jointAngles.map((a, i) => `J${i+1}=${a}`).join("<br>");
+                ui[robotId].status.textContent = 'Active';
+                ui[robotId].status.style.color = "green";
+
+                updateAndSendControlString();
+            }
+
+            if (ui[robotId] && data.debug_pose) {
+                const pose = data.debug_pose;
+                ui[robotId].pose.innerHTML = 
+                    `X: ${pose.x.toFixed(2)}<br>` +
+                    `Y: ${pose.y.toFixed(2)}<br>` +
+                    `Z: ${pose.z.toFixed(2)}<br>` +
+                    `Roll: ${pose.roll.toFixed(2)}<br>` +
+                    `Pitch: ${pose.pitch.toFixed(2)}<br>` +
+                    `Yaw: ${pose.yaw.toFixed(2)}`;
+            }
+        }
+    }
+    
+    function updateAndSendControlString() {
+        let str = "mac=asda;";
+        const jn = ["X","Y","Z","p","y","r"];
+        for (let i=0; i<6; i++) { str += `h1${jn[i]}=${robot1Joints[i] || 0};`; }
+        for (let i=0; i<6; i++) { str += `h2${jn[i]}=${robot2Joints[i] || 0};`; }
+
+        if (window.pywebview) {
+            window.pywebview.api.get_latest_serial().then(res => {
+                str += (res.serial || "") + ";";
+                const iframe = document.querySelector("#centerPane iframe");
+                if (iframe) iframe.contentWindow.postMessage({ controlString: str }, "*");
+            });
+        }
+    }
+
+    document.getElementById("zeroBtn1").addEventListener("click", () => {
+        if(window.pywebview) window.pywebview.api.go_to_zero_robot1().then(res => handle_robot_update(1, res));
+    });
+    document.getElementById("zeroBtn2").addEventListener("click", () => {
+        if(window.pywebview) window.pywebview.api.go_to_zero_robot2().then(res => handle_robot_update(2, res));
+    });
+
+    function onWindowResize(){
+        let pane3 = document.getElementById("mainThreejsView").parentElement;
+        r1_view.renderer.setSize(pane3.clientWidth, pane3.clientHeight);
+        r1_view.camera.aspect = pane3.clientWidth / pane3.clientHeight;
+        r1_view.camera.updateProjectionMatrix();
+        
+        let pane1 = document.getElementById("secondView").parentElement;
+        r2_view.renderer.setSize(pane1.clientWidth, pane1.clientHeight);
+        const aspect = pane1.clientWidth / pane1.clientHeight;
+        r2_view.camera.left = -120 * aspect;
+        r2_view.camera.right = 120 * aspect;
+        r2_view.camera.updateProjectionMatrix();
+    }
+    window.addEventListener('resize', onWindowResize);
+    window.addEventListener('pywebviewready', init);
+  </script>
+</body>
+</html>

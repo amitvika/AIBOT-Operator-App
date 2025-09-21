@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    /* Container for the video to allow an overlay */
+    #video-container {
+      position: relative;
+    }
+    /* The video fills the container */
+    #video {
+      width: 100%;
+      display: block;
+    }
+    /* Overlay container for controls on top of the video, positioned at top-left */
+    #video-controls {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(0, 0, 0, 0.5);
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 1000;
+    }
+    #video-controls button {
+      margin: 5px;
+      padding: 5px 10px;
+      background: rgba(255, 255, 255, 0.3);
+      border: none;
+      color: #fff;
+      cursor: pointer;
+    }
+    #video-controls button.active {
+      background: rgba(255, 255, 255, 0.6);
+    }
+    #control-string {
+      margin-top: 10px;
+      font-family: monospace;
+      padding: 5px;
+      border: 1px solid #ccc;
+    }
+    #incoming-messages {
+      margin-top: 10px;
+      border: 1px solid #ccc;
+      padding: 10px;
+      height: 100px;
+      overflow-y: scroll;
+      font-family: monospace;
+    }
+  </style>
+</head>
+<body>
+  <div id="video-container">
+    <video id="video" autoplay playsinline></video>
+    <div id="video-controls">
+      <button id="start-button">Click to Start and Enable Audio</button>
+      <button id="mute-button" style="display:none;">Mute</button>
+    </div>
+  </div>
+  
+  <audio id="audio" autoplay playsinline muted style="display:none;"></audio>
+  
+  <div id="control-string"></div>
+  <div id="incoming-messages"></div>
+  
+  <script>
+    // Global variable to hold the current WebSocket.
+    let globalWS = null;
+    let currentPC = null;
+
+    function startSignaling() {
+      // Create a new peer connection.
+      currentPC = new RTCPeerConnection();
+
+      const ws = new WebSocket("ws://64.225.55.176:8080");
+      globalWS = ws;
+
+      ws.onopen = () => {
+        console.log("DEBUG: Browser connected to signaling server");
+      };
+
+      ws.onmessage = async (event) => {
+        const data = JSON.parse(event.data);
+        console.log("DEBUG: Browser received", data);
+        if (data.type === "offer") {
+          console.log("DEBUG: Received offer, setting remote description");
+          await currentPC.setRemoteDescription({ type: "offer", sdp: data.sdp });
+          const answer = await currentPC.createAnswer();
+          await currentPC.setLocalDescription(answer);
+          console.log("DEBUG: Sending answer");
+          ws.send(JSON.stringify({
+            type: "answer",
+            sdp: answer.sdp
+          }));
+        } else if (data.type === "candidate") {
+          try {
+            console.log("DEBUG: Adding ICE candidate", data.candidate);
+            await currentPC.addIceCandidate(data.candidate);
+          } catch (err) {
+            console.error("DEBUG: Error adding candidate", err);
+          }
+        } else if (data.type === "control") {
+          const incomingDiv = document.getElementById("incoming-messages");
+          const msgDiv = document.createElement("div");
+          const content = data.controlString ? data.controlString : data.direction;
+          msgDiv.textContent = "Received control: " + content;
+          incomingDiv.appendChild(msgDiv);
+        }
+      };
+
+      ws.onclose = () => {
+        console.log("DEBUG: WebSocket closed. Reconnecting in 5 seconds...");
+        // Clean up the old peer connection.
+        if (currentPC) {
+          currentPC.close();
+          currentPC = null;
+        }
+        setTimeout(startSignaling, 5000);
+      };
+
+      ws.onerror = (err) => {
+        console.error("DEBUG: WebSocket error", err);
+        ws.close();
+      };
+
+      currentPC.onicecandidate = (event) => {
+        if (event.candidate) {
+          const candidateMsg = JSON.stringify({
+            type: "candidate",
+            candidate: event.candidate
+          });
+          console.log("DEBUG: Sending ICE candidate", candidateMsg);
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(candidateMsg);
+          }
+        }
+      };
+
+      currentPC.ontrack = (event) => {
+        event.streams.forEach((stream) => {
+          if (stream.getVideoTracks().length > 0) {
+            const video = document.getElementById("video");
+            if (video.srcObject !== stream) {
+              video.srcObject = stream;
+              console.log("DEBUG: Attached video stream.");
+            }
+          }
+          if (stream.getAudioTracks().length > 0) {
+            const audioElement = document.getElementById("audio");
+            if (audioElement.srcObject !== stream) {
+              audioElement.srcObject = stream;
+              console.log("DEBUG: Attached audio stream.");
+            }
+          }
+        });
+      };
+    }
+
+    // Start the signaling process immediately.
+    startSignaling();
+
+    // --- Control String and Audio Button Code ---
+    const audioElement = document.getElementById("audio");
+    const startButton = document.getElementById("start-button");
+    startButton.addEventListener("click", () => {
+      const video = document.getElementById("video");
+      video.muted = false;
+      audioElement.muted = false;
+      video.play().then(() => {
+        console.log("DEBUG: Video playback started with audio enabled.");
+      }).catch((err) => {
+        console.error("DEBUG: Error starting video playback:", err);
+      });
+      audioElement.play().then(() => {
+        console.log("DEBUG: Audio playback initiated by user gesture.");
+      }).catch(err => {
+        console.error("DEBUG: Error initiating audio playback:", err);
+      });
+      startButton.style.display = "none";
+      document.getElementById("mute-button").style.display = "inline-block";
+    });
+    
+    const muteButton = document.getElementById("mute-button");
+    muteButton.addEventListener("click", () => {
+      const video = document.getElementById("video");
+      if(video.muted) {
+        video.muted = false;
+        audioElement.muted = false;
+        muteButton.textContent = "Mute";
+      } else {
+        video.muted = true;
+        audioElement.muted = true;
+        muteButton.textContent = "Unmute";
+      }
+    });
+
+    // --- Control String Functionality ---
+    const defaultFixedPart = "mac=asda;h1X=0;h1Y=0;h1Z=0;h1p=0;h1y=0;h1r=0;h2X=0;h2Y=0;h2Z=0;h2p=0;h2y=0;h2r=0;";
+    let baseControlString = "";
+    let controlState = { f: 0, b: 0, l: 0, r: 0, u: 0, d: 0 };
+
+    function getControlString() {
+      const base = baseControlString || defaultFixedPart;
+      return base;
+    }
+
+    function updateControlDisplay() {
+      document.getElementById("control-string").textContent = getControlString();
+    }
+
+    function sendControlString() {
+      const controlStr = getControlString();
+      // Send only if the current WebSocket exists and is open.
+      if (globalWS && globalWS.readyState === WebSocket.OPEN) {
+        globalWS.send(JSON.stringify({ type: "control", controlString: controlStr }));
+        console.log("DEBUG: Sent control string:", controlStr);
+      }
+    }
+
+    function setControl(key, value) {
+      controlState[key] = value;
+      updateControlDisplay();
+      sendControlString();
+    }
+
+    updateControlDisplay();
+
+    window.addEventListener("message", (event) => {
+      if (event.data && event.data.controlString) {
+        baseControlString = event.data.controlString;
+        updateControlDisplay();
+        console.log("DEBUG: Received updated control string via postMessage:", getControlString());
+      }
+    });
+
+    // Send out the control string at 20 Hz (every 50 ms)
+    setInterval(sendControlString, 50);
+  </script>
+</body>
+</html>

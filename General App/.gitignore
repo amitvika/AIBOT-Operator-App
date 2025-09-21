@@ -1,0 +1,5 @@
+# Credentials and secrets
+creds.json
+
+# Python cache files
+__pycache__/
