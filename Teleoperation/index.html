@@ -26,6 +26,38 @@
         padding: 4px 4px 2px 4px;
         box-sizing: border-box;
     }
+    
+    #bottomToggle {
+        height: 30px;
+        background: #555;
+        border-top: 1px solid #777;
+        border-bottom: 1px solid #333;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: background-color 0.2s ease;
+    }
+    
+    #bottomToggle:hover {
+        background: #666;
+    }
+    
+    #bottomToggleButton {
+        background: #777;
+        color: white;
+        border: none;
+        padding: 4px 12px;
+        border-radius: 3px;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: bold;
+    }
+    
+    #bottomToggleButton:hover {
+        background: #888;
+    }
 
     #robot1UI, #robot2UI {
         flex-basis: 100px;
@@ -49,6 +81,13 @@
         gap: 4px;
         padding: 2px 4px 4px 4px;
         box-sizing: border-box;
+        transition: height 0.3s ease;
+    }
+    
+    #bottomContainer.hidden {
+        height: 0;
+        padding: 0;
+        overflow: hidden;
     }
 
     #pane1, #pane3 {
@@ -103,6 +142,10 @@
     </div>
   </div>
   
+  <div id="bottomToggle">
+    <button id="bottomToggleButton">Hide Bottom Panel</button>
+  </div>
+  
   <div id="bottomContainer">
     <div id="pane1"><canvas id="mainThreejsView"></canvas></div>
     <div id="pane2"><img id="aruco_feed"></div>
@@ -118,6 +161,9 @@
     let scene, r1_view, r2_view;
     let robotGroup1, robotGroup2;
     let robot1Joints = [0,0,0,0,0,0], robot2Joints = [0,0,0,0,0,0];
+    
+    // Bottom panel toggle state
+    let bottomPanelHidden = false;
 
     // *** OPTIMIZATION: State variables to hold the latest data from Python ***
     // This allows us to decouple data arrival from rendering updates.
@@ -181,6 +227,9 @@
             window.pywebview.api.go_to_zero_robot1().then(res => handle_robot_update(1, res));
             window.pywebview.api.go_to_zero_robot2().then(res => handle_robot_update(2, res));
         }
+        
+        // Initialize bottom panel toggle
+        initializeBottomPanelToggle();
     }
 
     function updateRobot(grp, positions){
@@ -284,6 +333,25 @@
         }
     }
 
+    // --- Bottom Panel Toggle Functions ---
+    function initializeBottomPanelToggle() {
+        const toggleButton = document.getElementById('bottomToggleButton');
+        const bottomContainer = document.getElementById('bottomContainer');
+        
+        toggleButton.addEventListener('click', () => {
+            bottomPanelHidden = !bottomPanelHidden;
+            bottomContainer.classList.toggle('hidden', bottomPanelHidden);
+            
+            if (bottomPanelHidden) {
+                toggleButton.textContent = 'Show Bottom Panel';
+            } else {
+                toggleButton.textContent = 'Hide Bottom Panel';
+                // Update Three.js renderers when showing
+                setTimeout(onWindowResize, 100);
+            }
+        });
+    }
+
     document.getElementById("zeroBtn1").addEventListener("click", () => {
         if(window.pywebview) window.pywebview.api.go_to_zero_robot1().then(res => handle_robot_update(1, res));
     });
@@ -292,17 +360,26 @@
     });
 
     function onWindowResize(){
-        let pane3 = document.getElementById("mainThreejsView").parentElement;
-        r1_view.renderer.setSize(pane3.clientWidth, pane3.clientHeight);
-        r1_view.camera.aspect = pane3.clientWidth / pane3.clientHeight;
-        r1_view.camera.updateProjectionMatrix();
+        const bottomContainer = document.getElementById('bottomContainer');
         
-        let pane1 = document.getElementById("secondView").parentElement;
-        r2_view.renderer.setSize(pane1.clientWidth, pane1.clientHeight);
-        const aspect = pane1.clientWidth / pane1.clientHeight;
-        r2_view.camera.left = -120 * aspect;
-        r2_view.camera.right = 120 * aspect;
-        r2_view.camera.updateProjectionMatrix();
+        // Only update Three.js renderers if bottom panel is not hidden
+        if (!bottomContainer.classList.contains('hidden')) {
+            let pane3 = document.getElementById("mainThreejsView").parentElement;
+            if (pane3 && r1_view && r1_view.renderer) {
+                r1_view.renderer.setSize(pane3.clientWidth, pane3.clientHeight);
+                r1_view.camera.aspect = pane3.clientWidth / pane3.clientHeight;
+                r1_view.camera.updateProjectionMatrix();
+            }
+            
+            let pane1 = document.getElementById("secondView").parentElement;
+            if (pane1 && r2_view && r2_view.renderer) {
+                r2_view.renderer.setSize(pane1.clientWidth, pane1.clientHeight);
+                const aspect = pane1.clientWidth / pane1.clientHeight;
+                r2_view.camera.left = -120 * aspect;
+                r2_view.camera.right = 120 * aspect;
+                r2_view.camera.updateProjectionMatrix();
+            }
+        }
     }
     window.addEventListener('resize', onWindowResize);
     window.addEventListener('pywebviewready', init);

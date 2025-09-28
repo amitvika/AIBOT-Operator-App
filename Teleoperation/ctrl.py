@@ -121,7 +121,7 @@ def read_serial_data():
     # --- CHANGE 2: All while loops now check the shutdown_event ---
     while not shutdown_event.is_set():
         try:
-            with serial.Serial("COM8", baudrate=9600, timeout=1) as ser:
+            with serial.Serial("COM4", baudrate=9600, timeout=1) as ser:
                 while not shutdown_event.is_set():
                     if ser.in_waiting > 0: latest_serial_data = ser.readline().decode('utf-8', 'replace').strip()
                     else: time.sleep(0.1)

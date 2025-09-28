@@ -39,11 +39,64 @@ def load_tab(tab_name):
     if tab_name == "Operator Tasks":
         return get_operator_tasks_html(db)
     elif tab_name == "Supervise":
-        return get_supervise_html()
+        return get_supervise_html(db)
     elif tab_name == "Profile":
         return get_profile_html(current_user)
     else:
         return "<div><p>Unknown tab selected</p></div>"
+
+def update_task_completion(task_id, is_completed):
+    """Update task completion status"""
+    global current_user, db
+    if current_user and db:
+        completed_by = current_user.get('email', '') if is_completed else None
+        return db.update_task_completion(task_id, is_completed, completed_by)
+    return False
+
+def update_profile(profile_data):
+    """Update user profile information"""
+    global current_user, db
+    print(f"DEBUG: update_profile called with data: {profile_data}")
+    print(f"DEBUG: current_user exists: {current_user is not None}")
+    print(f"DEBUG: db exists: {db is not None}")
+    
+    if current_user and db:
+        try:
+            print(f"DEBUG: Updating profile for email: {current_user['email']}")
+            # Update the profile in the database
+            success = db.update_operator_profile(current_user['email'], profile_data)
+            print(f"DEBUG: Database update result: {success}")
+            
+            if success:
+                # Update the current_user data with the new profile information
+                current_user.update(profile_data)
+                print(f"DEBUG: Updated current_user: {current_user}")
+            return success
+        except Exception as e:
+            print(f"Error updating profile: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    else:
+        print("DEBUG: Missing current_user or db")
+        return False
+
+def refresh_user_data():
+    """Refresh user data from database"""
+    global current_user, db
+    if current_user and db:
+        try:
+            # Get fresh user data from database
+            operators = db.get_all_operators()
+            for operator in operators:
+                if operator.get('email') == current_user['email']:
+                    current_user.update(operator)
+                    return True
+            return False
+        except Exception as e:
+            print(f"Error refreshing user data: {e}")
+            return False
+    return False
 
 def show_main_app(user_data):
     """Show the main application after successful login with tabs."""
@@ -186,6 +239,9 @@ def main():
     window.expose(logout)
     window.expose(on_close)
     window.expose(load_tab)
+    window.expose(update_task_completion)
+    window.expose(update_profile)
+    window.expose(refresh_user_data)
 
     # Set the loaded event handler to load the login page only once
     window.events.loaded += on_loaded

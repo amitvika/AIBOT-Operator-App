@@ -166,3 +166,89 @@ class FirestoreDB:
         except Exception as e:
             print(f"Error deleting operator: {e}")
             return False
+    
+    def update_task_completion(self, task_id, is_completed, completed_by=None):
+        """Update the completion status of a task.
+        
+        Args:
+            task_id (str): ID of the task to update.
+            is_completed (bool): Whether the task is completed.
+            completed_by (str): Email of the operator who completed the task.
+        
+        Returns:
+            bool: True if successful, False otherwise.
+        """
+        try:
+            task_ref = self.db.collection('tasks').document(task_id)
+            update_data = {
+                "is_completed": is_completed,
+                "completed_at": firestore.SERVER_TIMESTAMP if is_completed else None
+            }
+            if completed_by:
+                update_data["completed_by"] = completed_by
+            task_ref.update(update_data)
+            return True
+        except Exception as e:
+            print(f"Error updating task completion: {e}")
+            return False
+    
+    def get_all_tasks(self):
+        """Get all tasks from the tasks collection.
+        
+        Returns:
+            list: List of task dictionaries with document IDs.
+        """
+        try:
+            tasks = []
+            tasks_ref = self.db.collection('tasks')
+            docs = tasks_ref.stream()
+            for doc in docs:
+                task_data = doc.to_dict()
+                task_data['id'] = doc.id  # Include the document ID
+                tasks.append(task_data)
+            return tasks
+        except Exception as e:
+            print(f"Error getting all tasks: {e}")
+            return []
+    
+    def update_operator_profile(self, email, profile_data):
+        """Update operator profile information.
+        
+        Args:
+            email (str): Email of the operator to update.
+            profile_data (dict): Dictionary containing profile fields to update.
+        
+        Returns:
+            bool: True if successful, False otherwise.
+        """
+        try:
+            print(f"DEBUG: FirestoreDB.update_operator_profile called")
+            print(f"DEBUG: Email: {email}")
+            print(f"DEBUG: Profile data: {profile_data}")
+            
+            operators_ref = self.db.collection('operators')
+            query = operators_ref.where("email", "==", email).get()
+            
+            print(f"DEBUG: Found {len(query)} documents for email {email}")
+            
+            if not query:
+                print("Operator not found for profile update")
+                return False
+            
+            # Update all matching documents (should be only one)
+            for doc in query:
+                print(f"DEBUG: Updating document {doc.id}")
+                # Don't allow updating email or password through profile update
+                safe_profile_data = {k: v for k, v in profile_data.items() 
+                                   if k not in ['email', 'password', 'id']}
+                print(f"DEBUG: Safe profile data: {safe_profile_data}")
+                
+                doc.reference.update(safe_profile_data)
+                print(f"DEBUG: Successfully updated document {doc.id}")
+            
+            return True
+        except Exception as e:
+            print(f"Error updating operator profile: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
