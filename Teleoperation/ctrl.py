@@ -45,11 +45,37 @@ def get_robot_kinematic_info(robot_id):
     num_joints = p.getNumJoints(robot_id, physicsClientId=physicsClientId)
     movable_joints = [i for i in range(num_joints) if p.getJointInfo(robot_id, i, physicsClientId=physicsClientId)[2] != p.JOINT_FIXED]
     end_effector_link_index = movable_joints[-1] if movable_joints else -1
-    lower_limits, upper_limits, joint_ranges, rest_poses = [], [], [], []
+    lower_limits, upper_limits, joint_ranges, rest_poses, joint_names = [], [], [], [], []
+    
     for i in movable_joints:
         info = p.getJointInfo(robot_id, i, physicsClientId=physicsClientId)
-        lower_limits.append(info[8]); upper_limits.append(info[9]); joint_ranges.append(info[9] - info[8]); rest_poses.append(0)
-    return {"movable_joints": movable_joints, "end_effector_link": end_effector_link_index, "lower_limits": lower_limits, "upper_limits": upper_limits, "joint_ranges": joint_ranges, "rest_poses": rest_poses}
+        joint_name = info[1].decode('utf-8')
+        lower_limit = info[8]
+        upper_limit = info[9]
+        
+        # Handle unlimited joints (PyBullet returns -1 for unlimited)
+        if lower_limit == -1:
+            lower_limit = -math.pi
+        if upper_limit == -1:
+            upper_limit = math.pi
+            
+        lower_limits.append(lower_limit)
+        upper_limits.append(upper_limit)
+        joint_ranges.append(upper_limit - lower_limit)
+        rest_poses.append(0)  # Default rest pose at middle of range
+        joint_names.append(joint_name)
+        
+        print(f"Joint {i} ({joint_name}): limits [{lower_limit:.3f}, {upper_limit:.3f}] rad")
+    
+    return {
+        "movable_joints": movable_joints, 
+        "end_effector_link": end_effector_link_index, 
+        "lower_limits": lower_limits, 
+        "upper_limits": upper_limits, 
+        "joint_ranges": joint_ranges, 
+        "rest_poses": rest_poses,
+        "joint_names": joint_names
+    }
 
 robot_info1 = get_robot_kinematic_info(robot_id1)
 robot_info2 = get_robot_kinematic_info(robot_id2)
@@ -64,22 +90,83 @@ webview_window, latest_serial_data = None, "controller not connected"
 robot1_zeroing, robot2_zeroing = False, False
 last_detection_robot1, last_detection_robot2 = 0, 0
 latest_ui_frame, latest_ui_frame_lock = None, threading.Lock()
-FIXED_POS_SCALE, FIXED_ANGLE_SCALE = np.array([-175.,-75.,-150.]), np.array([-1.,-1.,-1.])
-OFFSET_ROBOT1_POS, OFFSET_ROBOT1_ORI = np.array([0.,100.,20.]), np.array([-90.,0.,0.])
-OFFSET_ROBOT2_POS, OFFSET_ROBOT2_ORI = np.array([0.,100.,20.]), np.array([-90.,0.,0.])
+FIXED_POS_SCALE, FIXED_ANGLE_SCALE = np.array([-2.625,-1.125,-2.25]), np.array([-1.,-1.,-1.])  # 15x larger for better movement
+OFFSET_ROBOT1_POS, OFFSET_ROBOT1_ORI = np.array([0.,1.5,0.3]), np.array([-90.,0.,0.])  # 15x larger for better movement
+OFFSET_ROBOT2_POS, OFFSET_ROBOT2_ORI = np.array([0.,1.5,0.3]), np.array([-90.,0.,0.])  # 15x larger for better movement
 ARUCO_MAPPING = {'x':0,'y':2,'z':1,'roll':0,'pitch':2,'yaw':1}
 filter_history = {'1':{k:deque(maxlen=3) for k in ARUCO_MAPPING}, '2':{k:deque(maxlen=3) for k in ARUCO_MAPPING}}
 
 def is_at_zero(q, tol=0.01): return all(abs(c) <= tol for c in q)
 
+def validate_joint_limits(joint_angles, robot_info):
+    """Validate joint angles against limits and return clamped values and violations"""
+    clamped_angles = np.array(joint_angles, dtype=np.float32)
+    violations = []
+    
+    for i, (angle, lower, upper) in enumerate(zip(joint_angles, robot_info["lower_limits"], robot_info["upper_limits"])):
+        if angle < lower:
+            clamped_angles[i] = lower
+            violations.append(f"Joint {i} ({robot_info['joint_names'][i]}): {angle:.3f} < {lower:.3f}")
+        elif angle > upper:
+            clamped_angles[i] = upper
+            violations.append(f"Joint {i} ({robot_info['joint_names'][i]}): {angle:.3f} > {upper:.3f}")
+    
+    return clamped_angles, violations
+
+def check_joint_limit_violations(joint_angles, robot_info):
+    """Check if joint angles violate limits without clamping"""
+    violations = []
+    for i, (angle, lower, upper) in enumerate(zip(joint_angles, robot_info["lower_limits"], robot_info["upper_limits"])):
+        if angle < lower or angle > upper:
+            violations.append({
+                'joint_index': i,
+                'joint_name': robot_info['joint_names'][i],
+                'current_angle': angle,
+                'lower_limit': lower,
+                'upper_limit': upper,
+                'violation_amount': min(angle - lower, upper - angle) if angle < lower else angle - upper
+            })
+    return violations
+
 # --- Kinematics Functions ---
 def pybullet_inverse_kinematics(robot_id_num, robot_info, x, y, z, roll, pitch, yaw):
     target_pos = [x, y, z]
     target_ori = p.getQuaternionFromEuler([math.radians(roll), math.radians(pitch), math.radians(yaw)])
-    joint_poses = p.calculateInverseKinematics(robot_id_num, robot_info["end_effector_link"], target_pos, target_ori, lowerLimits=robot_info["lower_limits"], upperLimits=robot_info["upper_limits"], jointRanges=robot_info["joint_ranges"], restPoses=robot_info["rest_poses"], solver=0, maxNumIterations=50, residualThreshold=.01, physicsClientId=physicsClientId)
-    return np.array(joint_poses[:len(robot_info["movable_joints"])], dtype=np.float32)
+    
+    # Use middle of joint ranges as rest poses for better IK convergence
+    rest_poses = [(lower + upper) / 2 for lower, upper in zip(robot_info["lower_limits"], robot_info["upper_limits"])]
+    
+    joint_poses = p.calculateInverseKinematics(
+        robot_id_num, 
+        robot_info["end_effector_link"], 
+        target_pos, 
+        target_ori, 
+        lowerLimits=robot_info["lower_limits"], 
+        upperLimits=robot_info["upper_limits"], 
+        jointRanges=robot_info["joint_ranges"], 
+        restPoses=rest_poses, 
+        solver=0, 
+        maxNumIterations=100,  # Increased for better convergence
+        residualThreshold=.001,  # Tighter tolerance
+        physicsClientId=physicsClientId
+    )
+    
+    result_angles = np.array(joint_poses[:len(robot_info["movable_joints"])], dtype=np.float32)
+    
+    # Validate and clamp results to joint limits
+    clamped_angles, violations = validate_joint_limits(result_angles, robot_info)
+    
+    if violations:
+        print(f"Joint limit violations in IK solution: {violations}")
+    
+    return clamped_angles
 
 def pybullet_forward_kinematics(robot_id_num, robot_info, joint_angles):
+    # Validate joint angles before setting them
+    violations = check_joint_limit_violations(joint_angles, robot_info)
+    if violations:
+        print(f"Joint limit violations in FK input: {[v['joint_name'] + f' ({v['current_angle']:.3f})' for v in violations]}")
+    
     for i, joint_index in enumerate(robot_info["movable_joints"]):
         p.resetJointState(robot_id_num, joint_index, joint_angles[i], physicsClientId=physicsClientId)
     link_positions = []
@@ -88,6 +175,23 @@ def pybullet_forward_kinematics(robot_id_num, robot_info, joint_angles):
     for i in robot_info["movable_joints"]:
         link_state = p.getLinkState(robot_id_num, i, computeForwardKinematics=True, physicsClientId=physicsClientId)
         link_positions.append(list(link_state[0]))
+    
+    # Add end effector (tool0) position and orientation
+    num_joints = p.getNumJoints(robot_id_num, physicsClientId=physicsClientId)
+    # Find the tool0 link
+    for i in range(num_joints):
+        joint_info = p.getJointInfo(robot_id_num, i, physicsClientId=physicsClientId)
+        if joint_info[12].decode('utf-8') == 'tool0':  # joint_info[12] is the child link name
+            tool0_state = p.getLinkState(robot_id_num, i, computeForwardKinematics=True, physicsClientId=physicsClientId)
+            link_positions.append(list(tool0_state[0]))  # Position
+            link_positions.append(list(tool0_state[1]))  # Orientation quaternion [x, y, z, w]
+            break
+    else:
+        # Fallback: if tool0 not found, use the last movable joint position and identity orientation
+        if link_positions:
+            link_positions.append(link_positions[-1])  # Position
+            link_positions.append([0, 0, 0, 1])  # Identity quaternion
+    
     return link_positions
 
 # --- Threaded Functions ---
@@ -199,18 +303,48 @@ class API:
         q, rob_id, rob_info, last, zeroing = (current_q1, robot_id1, robot_info1, last_detection_robot1, robot1_zeroing) if rid == 1 else (current_q2, robot_id2, robot_info2, last_detection_robot2, robot2_zeroing)
         if zeroing or (time.time() - last > 3):
             pos = pybullet_forward_kinematics(rob_id, rob_info, q)
-            return {"positions": pos, "joint_angles": [rad_to_12bit(a + o) for a, o in zip(q, joint_zero_offsets)]}
+            violations = check_joint_limit_violations(q, rob_info)
+            return {
+                "positions": pos, 
+                "joint_angles": [rad_to_12bit(a + o) for a, o in zip(q, joint_zero_offsets)],
+                "joint_limit_violations": violations,
+                "joint_limits": {
+                    "lower": rob_info["lower_limits"],
+                    "upper": rob_info["upper_limits"],
+                    "names": rob_info["joint_names"]
+                }
+            }
         new_q = pybullet_inverse_kinematics(rob_id, rob_info, x, y, z, roll, pitch, yaw)
         if new_q is not None and len(new_q) == len(q): q[:] = new_q
         pos = pybullet_forward_kinematics(rob_id, rob_info, q)
-        return {"positions": pos, "joint_angles": [rad_to_12bit(a + o) for a, o in zip(q, joint_zero_offsets)]}
+        violations = check_joint_limit_violations(q, rob_info)
+        return {
+            "positions": pos, 
+            "joint_angles": [rad_to_12bit(a + o) for a, o in zip(q, joint_zero_offsets)],
+            "joint_limit_violations": violations,
+            "joint_limits": {
+                "lower": rob_info["lower_limits"],
+                "upper": rob_info["upper_limits"],
+                "names": rob_info["joint_names"]
+            }
+        }
     def go_to_zero_robot(self, rid):
         q, rob_id, rob_info = (current_q1, robot_id1, robot_info1) if rid == 1 else (current_q2, robot_id2, robot_info2)
         if rid == 1: global robot1_zeroing; robot1_zeroing = True
         else: global robot2_zeroing; robot2_zeroing = True
         threading.Thread(target=move_all_joints_to_zero, args=(rid,), daemon=True).start()
         pos = pybullet_forward_kinematics(rob_id, rob_info, np.zeros_like(q))
-        return {f"positions{rid}": pos, f"joint_angles{rid}": [rad_to_12bit(a + o) for a,o in zip(np.zeros_like(q), joint_zero_offsets)]}
+        violations = check_joint_limit_violations(np.zeros_like(q), rob_info)
+        return {
+            f"positions{rid}": pos, 
+            f"joint_angles{rid}": [rad_to_12bit(a + o) for a,o in zip(np.zeros_like(q), joint_zero_offsets)],
+            f"joint_limit_violations{rid}": violations,
+            f"joint_limits{rid}": {
+                "lower": rob_info["lower_limits"],
+                "upper": rob_info["upper_limits"],
+                "names": rob_info["joint_names"]
+            }
+        }
     def go_to_zero_robot1(self): return self.go_to_zero_robot(1)
     def go_to_zero_robot2(self): return self.go_to_zero_robot(2)
 

@@ -122,6 +122,8 @@
           <button id="zeroBtn1">Zero Robot</button>
           <h5>Joint Angles:</h5>
           <div id="jointAngles1" class="debug-output"></div>
+          <h5>Joint Limits:</h5>
+          <div id="jointLimits1" class="debug-output"></div>
           <h5>Target Pose:</h5>
           <div id="poseDebug1" class="debug-output"></div>
         </div>
@@ -136,6 +138,8 @@
           <button id="zeroBtn2">Zero Robot</button>
           <h5>Joint Angles:</h5>
           <div id="jointAngles2" class="debug-output"></div>
+          <h5>Joint Limits:</h5>
+          <div id="jointLimits2" class="debug-output"></div>
           <h5>Target Pose:</h5>
           <div id="poseDebug2" class="debug-output"></div>
         </div>
@@ -154,8 +158,18 @@
   
   <script>
     const ui = {
-        1: { joints: document.getElementById("jointAngles1"), status: document.getElementById("status1"), pose: document.getElementById("poseDebug1") },
-        2: { joints: document.getElementById("jointAngles2"), status: document.getElementById("status2"), pose: document.getElementById("poseDebug2") }
+        1: { 
+            joints: document.getElementById("jointAngles1"), 
+            status: document.getElementById("status1"), 
+            pose: document.getElementById("poseDebug1"),
+            limits: document.getElementById("jointLimits1")
+        },
+        2: { 
+            joints: document.getElementById("jointAngles2"), 
+            status: document.getElementById("status2"), 
+            pose: document.getElementById("poseDebug2"),
+            limits: document.getElementById("jointLimits2")
+        }
     };
     
     let scene, r1_view, r2_view;
@@ -172,11 +186,26 @@
 
     const R1_MAT = new THREE.MeshLambertMaterial({color: 0x6688ff});
     const R2_MAT = new THREE.MeshLambertMaterial({color: 0xff6666});
-    const LINK_MAT = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 });
+    const R1_LIMIT_MAT = new THREE.MeshLambertMaterial({color: 0xffaa00}); // Orange for limit violations
+    const R2_LIMIT_MAT = new THREE.MeshLambertMaterial({color: 0xff4400}); // Red-orange for limit violations
+    const LINK_MAT = new THREE.LineBasicMaterial({ 
+        color: 0xffffff, 
+        linewidth: 2,
+        transparent: false,
+        opacity: 1.0
+    });
 
     function createRobotGroup(jointMaterial) {
         const group = new THREE.Group();
-        for (let i = 0; i < 8; i++) { group.add(new THREE.Mesh(new THREE.SphereGeometry(2.5), jointMaterial)); }
+        // Create 7 joint spheres (base + 6 joints)
+        for (let i = 0; i < 7; i++) { 
+            group.add(new THREE.Mesh(new THREE.SphereGeometry(.01), jointMaterial)); 
+        }
+        // Create end effector as 3-axis helper (replaces the 8th sphere)
+        const endEffector = new THREE.AxesHelper(0.02); // 2cm axes helper
+        group.add(endEffector);
+        
+        // Create line geometry for connecting all points (base + 6 joints + 1 end effector = 8 points)
         const lineGeometry = new THREE.BufferGeometry();
         lineGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(8 * 3), 3));
         group.add(new THREE.Line(lineGeometry, LINK_MAT));
@@ -191,11 +220,11 @@
         const aspect = pane.clientWidth / pane.clientHeight;
         let camera;
         if (isPerspective) {
-            camera = new THREE.PerspectiveCamera(65, aspect, 0.1, 2000);
-            camera.position.set(0, -100, 80);
+            camera = new THREE.PerspectiveCamera(65, aspect, 0.0001, 20.0); // Increased far plane for zoom out
+            camera.position.set(0, -0.1, 0.08); // Scaled for mm URDF (robot is now 1000x smaller)
         } else {
-            camera = new THREE.OrthographicCamera(-50 * aspect, 50 * aspect, 70, -30, -100, 500);
-            camera.position.set(0, 0, 100);
+            camera = new THREE.OrthographicCamera(-0.05 * aspect, 0.05 * aspect, 0.07, -0.03, -0.1, 0.5);
+            camera.position.set(0, 0, 0.1); // Scaled for mm URDF (robot is now 1000x smaller)
         }
         camera.lookAt(0,0,0);
         
@@ -206,11 +235,13 @@
     function init(){
         scene = new THREE.Scene();
         scene.background = new THREE.Color(0x222222);
-        scene.add(new THREE.GridHelper(200, 20));
-        scene.add(new THREE.AxesHelper(50));
+        const grid = new THREE.GridHelper(1.0, 20, 0x444444, 0x444444);
+        grid.rotation.x = Math.PI / 2; // Rotate 90 degrees to align with XY plane (red and green axes)
+        scene.add(grid);
+        scene.add(new THREE.AxesHelper(0.5)); // Larger axes helper to match grid
         scene.add(new THREE.AmbientLight(0x404040));
         const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
-        dirLight.position.set(50, -200, 100);
+        dirLight.position.set(0.05, -0.2, 0.1); // Scaled from meters to mm (1000x smaller)
         scene.add(dirLight);
 
         robotGroup1 = createRobotGroup(R1_MAT); scene.add(robotGroup1);
@@ -232,22 +263,60 @@
         initializeBottomPanelToggle();
     }
 
-    function updateRobot(grp, positions){
+    function updateRobot(grp, positions, jointAngles = null, violations = [], limits = {}){
         if (!positions || positions.length < 1) return;
         const line = grp.children.find(c => c.type === 'Line');
         if(!line) return;
         const points = line.geometry.attributes.position.array;
         
-        for (let i = 0; i < positions.length; i++) {
+        // Determine if this is robot 1 or 2 based on the group
+        const isRobot1 = grp === robotGroup1;
+        const limitMat = isRobot1 ? R1_LIMIT_MAT : R2_LIMIT_MAT;
+        const normalMat = isRobot1 ? R1_MAT : R2_MAT;
+        
+        // Update joint positions (first 7 positions: base + 6 joints)
+        for (let i = 0; i < Math.min(positions.length, 7); i++) {
             const pos = positions[i];
-            if(i < (grp.children.length -1)) {
-                grp.children[i].position.set(pos[0], pos[1], pos[2]);
-            }
+            grp.children[i].position.set(pos[0], pos[1], pos[2]);
             points[i * 3] = pos[0];
             points[i * 3 + 1] = pos[1];
             points[i * 3 + 2] = pos[2];
+            
+            // Change joint color if it's at a limit
+            if (violations.length > 0 && jointAngles && i > 0) { // Skip base joint (index 0)
+                const violation = violations.find(v => v.joint_index === (i - 1)); // Joint angles start from index 0, but positions include base
+                if (violation) {
+                    grp.children[i].material = limitMat;
+                } else {
+                    grp.children[i].material = normalMat;
+                }
+            } else {
+                grp.children[i].material = normalMat;
+            }
         }
-        line.geometry.setDrawRange(0, positions.length);
+        
+        // Update end effector position and orientation (positions 7 and 8)
+        if (positions.length >= 8) {
+            const endEffectorPos = positions[7]; // End effector position
+            const endEffectorOri = positions[8]; // End effector orientation quaternion
+            const endEffector = grp.children[7]; // End effector is the 8th child (index 7)
+            
+            // Set position
+            endEffector.position.set(endEffectorPos[0], endEffectorPos[1], endEffectorPos[2]);
+            
+            // Set orientation if quaternion is provided
+            if (endEffectorOri && endEffectorOri.length >= 4) {
+                endEffector.quaternion.set(endEffectorOri[0], endEffectorOri[1], endEffectorOri[2], endEffectorOri[3]);
+            }
+            
+            // Add end effector position to line (8th point)
+            points[7 * 3] = endEffectorPos[0];
+            points[7 * 3 + 1] = endEffectorPos[1];
+            points[7 * 3 + 2] = endEffectorPos[2];
+        }
+        
+        // Always draw 8 points (base + 6 joints + 1 end effector)
+        line.geometry.setDrawRange(0, 8);
         line.geometry.attributes.position.needsUpdate = true;
     }
 
@@ -287,20 +356,45 @@
     function apply_robot_update(robotId, data) {
         const positions_key = `positions${robotId}` in data ? `positions${robotId}` : 'positions';
         const angles_key = `joint_angles${robotId}` in data ? `joint_angles${robotId}` : 'joint_angles';
+        const violations_key = `joint_limit_violations${robotId}` in data ? `joint_limit_violations${robotId}` : 'joint_limit_violations';
+        const limits_key = `joint_limits${robotId}` in data ? `joint_limits${robotId}` : 'joint_limits';
 
         if (data && data[positions_key]) {
             const robotGroup = (robotId === 1) ? robotGroup1 : robotGroup2;
             const jointAngles = data[angles_key];
+            const violations = data[violations_key] || [];
+            const limits = data[limits_key] || {};
             
-            updateRobot(robotGroup, data[positions_key]);
+            updateRobot(robotGroup, data[positions_key], jointAngles, violations, limits);
             
             if (ui[robotId] && jointAngles) {
                 if (robotId === 1) robot1Joints = jointAngles;
                 else robot2Joints = jointAngles;
                 
-                ui[robotId].joints.innerHTML = jointAngles.map((a, i) => `J${i+1}=${a}`).join("<br>");
-                ui[robotId].status.textContent = 'Active';
-                ui[robotId].status.style.color = "green";
+                // Display joint angles with limit violation indicators
+                let jointDisplay = jointAngles.map((a, i) => {
+                    const violation = violations.find(v => v.joint_index === i);
+                    if (violation) {
+                        return `J${i+1}=${a} <span style="color: red;">⚠️ LIMIT</span>`;
+                    }
+                    return `J${i+1}=${a}`;
+                }).join("<br>");
+                
+                ui[robotId].joints.innerHTML = jointDisplay;
+                ui[robotId].status.textContent = violations.length > 0 ? 'Limit Violation' : 'Active';
+                ui[robotId].status.style.color = violations.length > 0 ? "red" : "green";
+                
+                // Display joint limits information
+                if (limits.lower && limits.upper && limits.names) {
+                    let limitsDisplay = limits.names.map((name, i) => {
+                        const lower = (limits.lower[i] * 180 / Math.PI).toFixed(1);
+                        const upper = (limits.upper[i] * 180 / Math.PI).toFixed(1);
+                        const violation = violations.find(v => v.joint_index === i);
+                        const style = violation ? 'color: red; font-weight: bold;' : '';
+                        return `<span style="${style}">${name}: [${lower}°, ${upper}°]</span>`;
+                    }).join("<br>");
+                    ui[robotId].limits.innerHTML = limitsDisplay;
+                }
 
                 updateAndSendControlString();
             }
@@ -346,8 +440,10 @@
                 toggleButton.textContent = 'Show Bottom Panel';
             } else {
                 toggleButton.textContent = 'Hide Bottom Panel';
-                // Update Three.js renderers when showing
-                setTimeout(onWindowResize, 100);
+                // Update Three.js renderers when showing - use multiple timeouts to ensure proper sizing
+                setTimeout(onWindowResize, 50);
+                setTimeout(onWindowResize, 200);
+                setTimeout(onWindowResize, 500);
             }
         });
     }
@@ -364,6 +460,9 @@
         
         // Only update Three.js renderers if bottom panel is not hidden
         if (!bottomContainer.classList.contains('hidden')) {
+            // Force a layout recalculation
+            bottomContainer.offsetHeight;
+            
             let pane3 = document.getElementById("mainThreejsView").parentElement;
             if (pane3 && r1_view && r1_view.renderer) {
                 r1_view.renderer.setSize(pane3.clientWidth, pane3.clientHeight);
@@ -375,8 +474,8 @@
             if (pane1 && r2_view && r2_view.renderer) {
                 r2_view.renderer.setSize(pane1.clientWidth, pane1.clientHeight);
                 const aspect = pane1.clientWidth / pane1.clientHeight;
-                r2_view.camera.left = -120 * aspect;
-                r2_view.camera.right = 120 * aspect;
+                r2_view.camera.left = -0.12 * aspect; // Scaled from 120m to 0.12m (120mm)
+                r2_view.camera.right = 0.12 * aspect; // Scaled from 120m to 0.12m (120mm)
                 r2_view.camera.updateProjectionMatrix();
             }
         }
