@@ -45,27 +45,31 @@ def get_robot_kinematic_info(robot_id):
     num_joints = p.getNumJoints(robot_id, physicsClientId=physicsClientId)
     movable_joints = [i for i in range(num_joints) if p.getJointInfo(robot_id, i, physicsClientId=physicsClientId)[2] != p.JOINT_FIXED]
     end_effector_link_index = movable_joints[-1] if movable_joints else -1
-    lower_limits, upper_limits, joint_ranges, rest_poses, joint_names = [], [], [], [], []
+    lower_limits, upper_limits, joint_ranges, rest_poses, joint_names, velocity_limits = [], [], [], [], [], []
     
     for i in movable_joints:
         info = p.getJointInfo(robot_id, i, physicsClientId=physicsClientId)
         joint_name = info[1].decode('utf-8')
         lower_limit = info[8]
         upper_limit = info[9]
+        velocity_limit = info[11]  # Extract velocity limit from joint info
         
         # Handle unlimited joints (PyBullet returns -1 for unlimited)
         if lower_limit == -1:
             lower_limit = -math.pi
         if upper_limit == -1:
             upper_limit = math.pi
+        if velocity_limit == -1:
+            velocity_limit = 10.0  # Default high velocity limit for unlimited joints
             
         lower_limits.append(lower_limit)
         upper_limits.append(upper_limit)
         joint_ranges.append(upper_limit - lower_limit)
         rest_poses.append(0)  # Default rest pose at middle of range
         joint_names.append(joint_name)
+        velocity_limits.append(velocity_limit)
         
-        print(f"Joint {i} ({joint_name}): limits [{lower_limit:.3f}, {upper_limit:.3f}] rad")
+        print(f"Joint {i} ({joint_name}): limits [{lower_limit:.3f}, {upper_limit:.3f}] rad, velocity {velocity_limit:.3f} rad/s")
     
     return {
         "movable_joints": movable_joints, 
@@ -74,7 +78,8 @@ def get_robot_kinematic_info(robot_id):
         "upper_limits": upper_limits, 
         "joint_ranges": joint_ranges, 
         "rest_poses": rest_poses,
-        "joint_names": joint_names
+        "joint_names": joint_names,
+        "velocity_limits": velocity_limits
     }
 
 robot_info1 = get_robot_kinematic_info(robot_id1)
@@ -90,11 +95,13 @@ webview_window, latest_serial_data = None, "controller not connected"
 robot1_zeroing, robot2_zeroing = False, False
 last_detection_robot1, last_detection_robot2 = 0, 0
 latest_ui_frame, latest_ui_frame_lock = None, threading.Lock()
-FIXED_POS_SCALE, FIXED_ANGLE_SCALE = np.array([-2.625,-1.125,-2.25]), np.array([-1.,-1.,-1.])  # 15x larger for better movement
-OFFSET_ROBOT1_POS, OFFSET_ROBOT1_ORI = np.array([0.,1.5,0.3]), np.array([-90.,0.,0.])  # 15x larger for better movement
-OFFSET_ROBOT2_POS, OFFSET_ROBOT2_ORI = np.array([0.,1.5,0.3]), np.array([-90.,0.,0.])  # 15x larger for better movement
+FIXED_POS_SCALE, FIXED_ANGLE_SCALE = np.array([-4,-2,-3]), np.array([-1.,-1.,-1.])  # Updated position scale for better end effector movement
+OFFSET_ROBOT1_POS, OFFSET_ROBOT1_ORI = np.array([0,2,-0.2]), np.array([-90.,0.,0.])  #first is red axis,     , third is blue axis
+OFFSET_ROBOT2_POS, OFFSET_ROBOT2_ORI = np.array([0,2,-0.2]), np.array([-90.,0.,0.])  # Y-axis moved down 200mm (1.5 + 0.2)
 ARUCO_MAPPING = {'x':0,'y':2,'z':1,'roll':0,'pitch':2,'yaw':1}
-filter_history = {'1':{k:deque(maxlen=3) for k in ARUCO_MAPPING}, '2':{k:deque(maxlen=3) for k in ARUCO_MAPPING}}
+filter_history = {'1':{k:deque(maxlen=8) for k in ARUCO_MAPPING}, '2':{k:deque(maxlen=8) for k in ARUCO_MAPPING}}
+# Store last smoothed values for velocity-based smoothing
+last_smoothed_values = {'1': {}, '2': {}}
 
 def is_at_zero(q, tol=0.01): return all(abs(c) <= tol for c in q)
 
@@ -128,8 +135,97 @@ def check_joint_limit_violations(joint_angles, robot_info):
             })
     return violations
 
+def validate_joint_velocities(current_angles, target_angles, robot_info, dt=0.01):
+    """Validate joint velocities against limits and return clamped target angles - OPTIMIZED"""
+    try:
+        if len(current_angles) != len(target_angles):
+            return target_angles, []
+        
+        # Vectorized operations for speed
+        current = np.array(current_angles, dtype=np.float32)
+        target = np.array(target_angles, dtype=np.float32)
+        velocity_limits = np.array(robot_info["velocity_limits"], dtype=np.float32)
+    except Exception as e:
+        print(f"Error in velocity validation setup: {e}")
+        return target_angles, []
+    
+    try:
+        # Calculate distances for all joints
+        distances = np.abs(target - current)
+        
+        # If no movement needed, return original
+        if np.max(distances) < 1e-6:
+            return target_angles, []
+        
+        # Calculate required time to reach each target at maximum velocity
+        required_times = distances / velocity_limits
+        
+        # Use the maximum required time, but clamp it to reasonable bounds
+        max_required_time = np.max(required_times)
+        max_required_time = max(0.001, min(0.1, max_required_time))  # Clamp between 1ms and 100ms
+        
+        # Calculate velocities using the dynamic time
+        velocities = distances / max_required_time
+        
+        # Find violations using vectorized operations
+        violations_mask = velocities > velocity_limits
+        
+        if not np.any(violations_mask):
+            return target_angles, []  # No violations, return original
+        
+        # Only process violations using the dynamic time
+        clamped_angles = target.copy()
+        max_displacements = velocity_limits * max_required_time
+        
+        for i in np.where(violations_mask)[0]:
+            direction = 1 if target[i] > current[i] else -1
+            clamped_angles[i] = current[i] + direction * max_displacements[i]
+        
+        # Only create violation objects for actual violations (reduced overhead)
+        velocity_violations = []
+        violation_indices = np.where(violations_mask)[0]
+        if len(violation_indices) > 0:  # Only create objects if there are violations
+            joint_names = robot_info['joint_names']
+            for i in violation_indices:
+                velocity_violations.append({
+                    'joint_index': int(i),
+                    'joint_name': joint_names[i],
+                    'required_velocity': float(velocities[i]),
+                    'velocity_limit': float(velocity_limits[i]),
+                    'violation_amount': float(velocities[i] - velocity_limits[i])
+                })
+        
+        return clamped_angles, velocity_violations
+    except Exception as e:
+        print(f"Error in velocity validation: {e}")
+        return target_angles, []
+
+def check_joint_velocity_violations(current_angles, target_angles, robot_info, dt=0.01):
+    """Check if joint velocities would violate limits without clamping"""
+    if len(current_angles) != len(target_angles):
+        return []
+    
+    velocity_violations = []
+    
+    for i, (current, target, velocity_limit) in enumerate(zip(current_angles, target_angles, robot_info["velocity_limits"])):
+        # Calculate required velocity
+        velocity = abs(target - current) / dt
+        
+        if velocity > velocity_limit:
+            velocity_violations.append({
+                'joint_index': i,
+                'joint_name': robot_info['joint_names'][i],
+                'required_velocity': velocity,
+                'velocity_limit': velocity_limit,
+                'violation_amount': velocity - velocity_limit,
+                'current_angle': current,
+                'target_angle': target
+            })
+    
+    return velocity_violations
+
 # --- Kinematics Functions ---
-def pybullet_inverse_kinematics(robot_id_num, robot_info, x, y, z, roll, pitch, yaw):
+def pybullet_inverse_kinematics(robot_id_num, robot_info, x, y, z, roll, pitch, yaw, current_angles=None, dt=0.01):
     target_pos = [x, y, z]
     target_ori = p.getQuaternionFromEuler([math.radians(roll), math.radians(pitch), math.radians(yaw)])
     
@@ -146,8 +242,8 @@ def pybullet_inverse_kinematics(robot_id_num, robot_info, x, y, z, roll, pitch, 
         jointRanges=robot_info["joint_ranges"], 
         restPoses=rest_poses, 
         solver=0, 
-        maxNumIterations=100,  # Increased for better convergence
-        residualThreshold=.001,  # Tighter tolerance
+        maxNumIterations=20,  # Reduced for speed - 5x faster
+        residualThreshold=.01,  # Relaxed tolerance for speed
         physicsClientId=physicsClientId
     )
     
@@ -156,10 +252,27 @@ def pybullet_inverse_kinematics(robot_id_num, robot_info, x, y, z, roll, pitch, 
     # Validate and clamp results to joint limits
     clamped_angles, violations = validate_joint_limits(result_angles, robot_info)
     
+    # Reduced debug printing for performance - only print every 50 violations
     if violations:
-        print(f"Joint limit violations in IK solution: {violations}")
+        if not hasattr(pybullet_inverse_kinematics, 'joint_violation_counter'):
+            pybullet_inverse_kinematics.joint_violation_counter = 0
+        pybullet_inverse_kinematics.joint_violation_counter += 1
+        if pybullet_inverse_kinematics.joint_violation_counter % 50 == 0:
+            print(f"Joint limit violations in IK solution: {violations}")
     
-    return clamped_angles
+    # Apply velocity limits if current angles are provided
+    if current_angles is not None:
+        velocity_clamped_angles, velocity_violations = validate_joint_velocities(current_angles, clamped_angles, robot_info, dt)
+        # Only print velocity violations every 50 occurrences to reduce console spam
+        if velocity_violations and len(velocity_violations) > 0:
+            if not hasattr(pybullet_inverse_kinematics, 'velocity_violation_counter'):
+                pybullet_inverse_kinematics.velocity_violation_counter = 0
+            pybullet_inverse_kinematics.velocity_violation_counter += 1
+            if pybullet_inverse_kinematics.velocity_violation_counter % 50 == 0:
+                print(f"Velocity limit violations: {[v['joint_name'] for v in velocity_violations]}")
+        return velocity_clamped_angles, velocity_violations
+    
+    return clamped_angles, []
 
 def pybullet_forward_kinematics(robot_id_num, robot_info, joint_angles):
     # Validate joint angles before setting them
@@ -217,8 +330,45 @@ def transform_aruco_marker(marker_data, robot_id):
     offsets, scales = np.concatenate((offset_pos, offset_ori)), np.concatenate((FIXED_POS_SCALE, FIXED_ANGLE_SCALE))
     scaled = remapped * scales + offsets
     raw = dict(zip(['x', 'y', 'z', 'roll', 'pitch', 'yaw'], scaled))
+    
+    # Enhanced smoothing with larger history, outlier rejection, and velocity limiting
     history = filter_history[str(robot_id)]
-    return {k: sum(d)/(len(d) or 1) for k,v in raw.items() if (d:=history[k]).append(v) or True}
+    last_values = last_smoothed_values[str(robot_id)]
+    smoothed = {}
+    
+    # Maximum change rate per update (in units per second) - increased for better responsiveness
+    max_change_rates = {'x': 1.5, 'y': 1.5, 'z': 0.8, 'roll': 90, 'pitch': 90, 'yaw': 90}
+    dt = 1.0 / 60.0  # Update rate
+    
+    for k, v in raw.items():
+        d = history[k]
+        d.append(v)
+        
+        # Outlier rejection: remove values that are too far from the median
+        if len(d) >= 3:
+            median_val = np.median(d)
+            # Reject values that are more than 2 standard deviations from median
+            filtered_d = [x for x in d if abs(x - median_val) < 2 * np.std(d)]
+            if len(filtered_d) > 0:
+                filtered_value = np.mean(filtered_d)
+            else:
+                filtered_value = median_val
+        else:
+            filtered_value = v
+        
+        # Velocity-based smoothing: limit how fast the value can change
+        if k in last_values:
+            max_change = max_change_rates.get(k, 1.0) * dt
+            change = filtered_value - last_values[k]
+            if abs(change) > max_change:
+                # Clamp the change to maximum allowed rate
+                direction = 1 if change > 0 else -1
+                filtered_value = last_values[k] + direction * max_change
+        
+        smoothed[k] = filtered_value
+        last_values[k] = filtered_value
+    
+    return smoothed
 
 def read_serial_data():
     global latest_serial_data
@@ -234,14 +384,20 @@ def read_serial_data():
             time.sleep(2)
 
 def camera_capture_thread(cap, frame_queue):
+    # Conservative camera optimization for better motion tracking
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimal buffer for lower latency
+    cap.set(cv2.CAP_PROP_FPS, 60)  # Request 60 FPS for better motion tracking
+    
     while not shutdown_event.is_set():
         ret, frame = cap.read()
         if ret:
+            # Always drop old frames to maintain low latency
             if frame_queue.full():
                 try: frame_queue.get_nowait()
                 except queue.Empty: pass
             frame_queue.put(frame)
-        else: time.sleep(0.01)
+        else: 
+            time.sleep(0.001)  # Keep reasonable recovery time
 
 def rotationMatrixToEulerAngles(R):
     sy = np.sqrt(R[0,0]**2 + R[1,0]**2)
@@ -250,41 +406,90 @@ def rotationMatrixToEulerAngles(R):
 def update_ui_feed():
     with latest_ui_frame_lock: frame_to_render = latest_ui_frame
     if frame_to_render is not None and webview_window:
-        ret, buf = cv2.imencode('.jpg', frame_to_render, [cv2.IMWRITE_JPEG_QUALITY, 75])
+        # Reduce JPEG quality for faster encoding/transmission
+        ret, buf = cv2.imencode('.jpg', frame_to_render, [cv2.IMWRITE_JPEG_QUALITY, 60])
         if ret:
             js_code = f"document.getElementById('aruco_feed').src='data:image/jpeg;base64,{base64.b64encode(buf).decode('utf-8')}';"
             try: webview_window.evaluate_js(js_code)
             except Exception: pass
     if not shutdown_event.is_set():
-        threading.Timer(1.0 / 30.0, update_ui_feed).start()
+        threading.Timer(1.0 / 45.0, update_ui_feed).start()  # Increased to 45 FPS for better responsiveness
 
 def run_aruco(frame_queue, api_instance):
     global last_detection_robot1, last_detection_robot2, robot1_zeroing, robot2_zeroing, latest_ui_frame, latest_ui_frame_lock
     aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
     params = cv2.aruco.DetectorParameters()
+    # Conservative ArUco detection optimization - keep detection reliable
+    params.adaptiveThreshWinSizeMin = 3
+    params.adaptiveThreshWinSizeMax = 23
+    params.adaptiveThreshWinSizeStep = 10
+    params.adaptiveThreshConstant = 7
+    params.minMarkerPerimeterRate = 0.03
+    params.maxMarkerPerimeterRate = 4.0
+    params.polygonalApproxAccuracyRate = 0.03
+    params.minCornerDistanceRate = 0.05
+    params.minDistanceToBorder = 3
+    params.minMarkerDistanceRate = 0.05
+    params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_NONE  # Disable corner refinement for speed
+    # Keep error correction enabled for reliable detection
+    params.errorCorrectionRate = 0.6  # Moderate error correction
+    
     cam_matrix, dist_coeffs = np.array([[800,0,320],[0,800,240],[0,0,1]],dtype=np.float64), np.zeros(4)
+    
+    # Pre-allocate arrays for better performance
+    last_update_time = [0.0, 0.0]  # For rate limiting
+    min_update_interval = 1.0 / 80.0  # 80 FPS max update rate - increased for better responsiveness
+    
     while not shutdown_event.is_set():
         try:
-            frame = frame_queue.get(timeout=0.1)
+            frame = frame_queue.get(timeout=0.005)  # Reduced timeout for lower latency
+            current_time = time.time()
+            
+            # Process every frame for detection, but limit IK updates
+            # This ensures detection happens but reduces computational load
+                
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             corners, ids, _ = cv2.aruco.detectMarkers(gray, aruco_dict, parameters=params)
+            
             if ids is not None:
                 cv2.aruco.drawDetectedMarkers(frame, corners, ids)
                 rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, 0.06, cam_matrix, dist_coeffs)
+                
                 for i, marker_id in enumerate(ids.flatten()):
                     if marker_id not in [0, 1]: continue
                     robot_id = marker_id + 1
-                    if robot_id == 1: last_detection_robot1 = time.time()
-                    else: last_detection_robot2 = time.time()
+                    robot_idx = robot_id - 1
+                    
+                    # Always update detection time for tracking
+                    if robot_id == 1: 
+                        last_detection_robot1 = current_time
+                    else: 
+                        last_detection_robot2 = current_time
+                    
+                    # Rate limiting for IK updates only - detection happens every frame
+                    if current_time - last_update_time[robot_idx] < min_update_interval:
+                        continue
+                    
+                    last_update_time[robot_idx] = current_time
+                        
                     R, _ = cv2.Rodrigues(rvecs[i])
                     marker_data = {"position": tvecs[i][0], "orientation": rotationMatrixToEulerAngles(R)}
                     processed_target = transform_aruco_marker(marker_data, robot_id)
                     ik_result = api_instance.update_target(robot_id, **processed_target)
                     ik_result['debug_pose'] = processed_target
+                    
                     if webview_window:
-                        js_code = f"handle_robot_update({robot_id}, {json.dumps(ik_result)});"
+                        # Optimize JSON serialization - only include essential data
+                        compact_data = {
+                            "positions": ik_result["positions"],
+                            "joint_angles": ik_result["joint_angles"],
+                            "joint_limit_violations": ik_result.get("joint_limit_violations", []),
+                            "joint_limits": ik_result.get("joint_limits", {})
+                        }
+                        js_code = f"handle_robot_update({robot_id}, {json.dumps(compact_data)});"
                         try: webview_window.evaluate_js(js_code)
                         except Exception: pass
+                        
             with latest_ui_frame_lock: latest_ui_frame = frame
             now = time.time()
             if (now - last_detection_robot1 > 3) and not is_at_zero(current_q1) and not robot1_zeroing:
@@ -312,9 +517,17 @@ class API:
                     "lower": rob_info["lower_limits"],
                     "upper": rob_info["upper_limits"],
                     "names": rob_info["joint_names"]
-                }
+                },
+                "velocity_limits": rob_info["velocity_limits"]
             }
-        new_q = pybullet_inverse_kinematics(rob_id, rob_info, x, y, z, roll, pitch, yaw)
+        
+        # Use a reasonable time delta for velocity limiting
+        # The dynamic approach will calculate optimal time internally
+        dt = 1.0 / 60.0  # 60 FPS update rate - good balance for responsiveness
+        
+        # Always apply velocity limits but with optimized checking
+        new_q, velocity_violations = pybullet_inverse_kinematics(rob_id, rob_info, x, y, z, roll, pitch, yaw, current_angles=q, dt=dt)
+        
         if new_q is not None and len(new_q) == len(q): q[:] = new_q
         pos = pybullet_forward_kinematics(rob_id, rob_info, q)
         violations = check_joint_limit_violations(q, rob_info)
@@ -322,11 +535,13 @@ class API:
             "positions": pos, 
             "joint_angles": [rad_to_12bit(a + o) for a, o in zip(q, joint_zero_offsets)],
             "joint_limit_violations": violations,
+            "velocity_limit_violations": velocity_violations,
             "joint_limits": {
                 "lower": rob_info["lower_limits"],
                 "upper": rob_info["upper_limits"],
                 "names": rob_info["joint_names"]
-            }
+            },
+            "velocity_limits": rob_info["velocity_limits"]
         }
     def go_to_zero_robot(self, rid):
         q, rob_id, rob_info = (current_q1, robot_id1, robot_info1) if rid == 1 else (current_q2, robot_id2, robot_info2)
@@ -339,14 +554,43 @@ class API:
             f"positions{rid}": pos, 
             f"joint_angles{rid}": [rad_to_12bit(a + o) for a,o in zip(np.zeros_like(q), joint_zero_offsets)],
             f"joint_limit_violations{rid}": violations,
+            f"velocity_limit_violations{rid}": [],  # No velocity violations when going to zero
             f"joint_limits{rid}": {
                 "lower": rob_info["lower_limits"],
                 "upper": rob_info["upper_limits"],
                 "names": rob_info["joint_names"]
-            }
+            },
+            f"velocity_limits{rid}": rob_info["velocity_limits"]
         }
     def go_to_zero_robot1(self): return self.go_to_zero_robot(1)
     def go_to_zero_robot2(self): return self.go_to_zero_robot(2)
+    
+    def update_tuning_params(self, robot_id, params):
+        """Update tuning parameters for a robot"""
+        global FIXED_POS_SCALE, OFFSET_ROBOT1_POS, OFFSET_ROBOT2_POS
+        
+        try:
+            # Update position scaling
+            if 'scale' in params:
+                scale = params['scale']
+                if len(scale) == 3:
+                    FIXED_POS_SCALE = np.array(scale, dtype=np.float32)
+                    print(f"Updated FIXED_POS_SCALE to: {FIXED_POS_SCALE}")
+            
+            # Update position offsets
+            if 'offset' in params:
+                offset = params['offset']
+                if len(offset) == 3:
+                    if robot_id == 1:
+                        OFFSET_ROBOT1_POS = np.array(offset, dtype=np.float32)
+                        print(f"Updated OFFSET_ROBOT1_POS to: {OFFSET_ROBOT1_POS}")
+                    elif robot_id == 2:
+                        OFFSET_ROBOT2_POS = np.array(offset, dtype=np.float32)
+                        print(f"Updated OFFSET_ROBOT2_POS to: {OFFSET_ROBOT2_POS}")
+            
+            return {"status": "success", "message": f"Updated tuning parameters for Robot {robot_id}"}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
 
 # --- CHANGE 3: This function will be called by pywebview when the window is closed ---
 def on_window_closed():
@@ -361,7 +605,12 @@ if __name__ == '__main__':
         threading.Thread(target=read_serial_data, daemon=True).start()
         if not cap.isOpened(): print("Error: Could not open video stream.")
         else:
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640); cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            # Conservative camera optimization for better motion tracking
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            cap.set(cv2.CAP_PROP_FPS, 60)  # Request 60 FPS for better motion tracking
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimal buffer for low latency
+            cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.5)  # Moderate auto exposure for reliable detection
             frame_queue = queue.Queue(maxsize=1)
             threading.Thread(target=camera_capture_thread, args=(cap,frame_queue), daemon=True).start()
             threading.Thread(target=run_aruco, args=(frame_queue, api_main), daemon=True).start()

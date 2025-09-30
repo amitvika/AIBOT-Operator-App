@@ -67,6 +67,41 @@
         border-radius: 4px;
         overflow-y: auto;
     }
+    
+    .tuning-controls {
+        background: #e8e8e8;
+        padding: 8px;
+        border-radius: 4px;
+        margin-top: 5px;
+        font-size: 11px;
+    }
+    
+    .tuning-controls label {
+        display: block;
+        margin: 2px 0;
+        font-weight: bold;
+    }
+    
+    .tuning-controls input {
+        border: 1px solid #ccc;
+        border-radius: 2px;
+        padding: 2px 4px;
+        font-size: 11px;
+    }
+    
+    .tuning-controls button {
+        background: #4CAF50;
+        color: white;
+        border: none;
+        padding: 4px 8px;
+        border-radius: 3px;
+        cursor: pointer;
+        font-size: 11px;
+    }
+    
+    .tuning-controls button:hover {
+        background: #45a049;
+    }
     #centerPane {
         flex-grow: 1;
         background: #000;
@@ -126,6 +161,17 @@
           <div id="jointLimits1" class="debug-output"></div>
           <h5>Target Pose:</h5>
           <div id="poseDebug1" class="debug-output"></div>
+          
+          <h5>Tuning Controls:</h5>
+          <div class="tuning-controls">
+            <label>Position Scale X: <input type="number" id="scaleX1" value="-4" step="0.1" style="width: 60px;"></label><br>
+            <label>Position Scale Y: <input type="number" id="scaleY1" value="-2" step="0.1" style="width: 60px;"></label><br>
+            <label>Position Scale Z: <input type="number" id="scaleZ1" value="-3" step="0.1" style="width: 60px;"></label><br>
+            <label>Offset X: <input type="number" id="offsetX1" value="0" step="0.1" style="width: 60px;"></label><br>
+            <label>Offset Y: <input type="number" id="offsetY1" value="2" step="0.1" style="width: 60px;"></label><br>
+            <label>Offset Z: <input type="number" id="offsetZ1" value="-0.2" step="0.1" style="width: 60px;"></label><br>
+            <button id="applyTuning1" style="margin-top: 5px;">Apply Changes</button>
+          </div>
         </div>
     </div>
     <div id="centerPane">
@@ -142,6 +188,17 @@
           <div id="jointLimits2" class="debug-output"></div>
           <h5>Target Pose:</h5>
           <div id="poseDebug2" class="debug-output"></div>
+          
+          <h5>Tuning Controls:</h5>
+          <div class="tuning-controls">
+            <label>Position Scale X: <input type="number" id="scaleX2" value="-4" step="0.1" style="width: 60px;"></label><br>
+            <label>Position Scale Y: <input type="number" id="scaleY2" value="-2" step="0.1" style="width: 60px;"></label><br>
+            <label>Position Scale Z: <input type="number" id="scaleZ2" value="-3" step="0.1" style="width: 60px;"></label><br>
+            <label>Offset X: <input type="number" id="offsetX2" value="0" step="0.1" style="width: 60px;"></label><br>
+            <label>Offset Y: <input type="number" id="offsetY2" value="2" step="0.1" style="width: 60px;"></label><br>
+            <label>Offset Z: <input type="number" id="offsetZ2" value="-0.2" step="0.1" style="width: 60px;"></label><br>
+            <button id="applyTuning2" style="margin-top: 5px;">Apply Changes</button>
+          </div>
         </div>
     </div>
   </div>
@@ -202,7 +259,7 @@
             group.add(new THREE.Mesh(new THREE.SphereGeometry(.01), jointMaterial)); 
         }
         // Create end effector as 3-axis helper (replaces the 8th sphere)
-        const endEffector = new THREE.AxesHelper(0.02); // 2cm axes helper
+        const endEffector = new THREE.AxesHelper(0.06); // 6cm axes helper (3x bigger)
         group.add(endEffector);
         
         // Create line geometry for connecting all points (base + 6 joints + 1 end effector = 8 points)
@@ -220,11 +277,13 @@
         const aspect = pane.clientWidth / pane.clientHeight;
         let camera;
         if (isPerspective) {
-            camera = new THREE.PerspectiveCamera(65, aspect, 0.0001, 20.0); // Increased far plane for zoom out
-            camera.position.set(0, -0.1, 0.08); // Scaled for mm URDF (robot is now 1000x smaller)
+            // Left side - perspective view (zoomed out 6x from original)
+            camera = new THREE.PerspectiveCamera(65, aspect, 0.0001, 20.0);
+            camera.position.set(0, -0.6, 0.48); // Zoomed out 6x from original position
         } else {
-            camera = new THREE.OrthographicCamera(-0.05 * aspect, 0.05 * aspect, 0.07, -0.03, -0.1, 0.5);
-            camera.position.set(0, 0, 0.1); // Scaled for mm URDF (robot is now 1000x smaller)
+            // Right side - perspective view (zoomed out 6x from original)
+            camera = new THREE.PerspectiveCamera(65, aspect, 0.0001, 20.0);
+            camera.position.set(0, -0.6, 0.48); // Zoomed out 6x from original position
         }
         camera.lookAt(0,0,0);
         
@@ -263,7 +322,7 @@
         initializeBottomPanelToggle();
     }
 
-    function updateRobot(grp, positions, jointAngles = null, violations = [], limits = {}){
+    function updateRobot(grp, positions, jointAngles = null, violations = [], limits = {}, velocity_violations = []){
         if (!positions || positions.length < 1) return;
         const line = grp.children.find(c => c.type === 'Line');
         if(!line) return;
@@ -274,6 +333,13 @@
         const limitMat = isRobot1 ? R1_LIMIT_MAT : R2_LIMIT_MAT;
         const normalMat = isRobot1 ? R1_MAT : R2_MAT;
         
+        // Create velocity violation material (orange/yellow)
+        const velocityMat = new THREE.MeshBasicMaterial({ 
+            color: isRobot1 ? 0xff8800 : 0xffaa00, // Orange for robot 1, lighter orange for robot 2
+            transparent: false,
+            opacity: 1.0
+        });
+        
         // Update joint positions (first 7 positions: base + 6 joints)
         for (let i = 0; i < Math.min(positions.length, 7); i++) {
             const pos = positions[i];
@@ -282,11 +348,15 @@
             points[i * 3 + 1] = pos[1];
             points[i * 3 + 2] = pos[2];
             
-            // Change joint color if it's at a limit
-            if (violations.length > 0 && jointAngles && i > 0) { // Skip base joint (index 0)
+            // Change joint color based on violations (prioritize limit violations over velocity violations)
+            if ((violations.length > 0 || velocity_violations.length > 0) && jointAngles && i > 0) { // Skip base joint (index 0)
                 const violation = violations.find(v => v.joint_index === (i - 1)); // Joint angles start from index 0, but positions include base
+                const velocity_violation = velocity_violations.find(v => v.joint_index === (i - 1));
+                
                 if (violation) {
-                    grp.children[i].material = limitMat;
+                    grp.children[i].material = limitMat; // Red for limit violations (highest priority)
+                } else if (velocity_violation) {
+                    grp.children[i].material = velocityMat; // Orange for velocity violations
                 } else {
                     grp.children[i].material = normalMat;
                 }
@@ -344,9 +414,20 @@
 
     // *** OPTIMIZATION: This function is called from Python and just stores the latest data ***
     function handle_robot_update(robotId, data) {
+        // OPTIMIZATION: Faster duplicate detection using simple hash instead of JSON.stringify
+        const dataHash = data.positions ? data.positions.join(',') + (data.joint_angles ? data.joint_angles.join(',') : '') : '';
+        
         if (robotId === 1) {
+            if (robot1UpdateData && robot1UpdateData.hash === dataHash) {
+                return; // Skip identical updates
+            }
+            data.hash = dataHash; // Add hash for next comparison
             robot1UpdateData = data;
         } else {
+            if (robot2UpdateData && robot2UpdateData.hash === dataHash) {
+                return; // Skip identical updates
+            }
+            data.hash = dataHash; // Add hash for next comparison
             robot2UpdateData = data;
         }
     }
@@ -357,32 +438,51 @@
         const positions_key = `positions${robotId}` in data ? `positions${robotId}` : 'positions';
         const angles_key = `joint_angles${robotId}` in data ? `joint_angles${robotId}` : 'joint_angles';
         const violations_key = `joint_limit_violations${robotId}` in data ? `joint_limit_violations${robotId}` : 'joint_limit_violations';
+        const velocity_violations_key = `velocity_limit_violations${robotId}` in data ? `velocity_limit_violations${robotId}` : 'velocity_limit_violations';
         const limits_key = `joint_limits${robotId}` in data ? `joint_limits${robotId}` : 'joint_limits';
+        const velocity_limits_key = `velocity_limits${robotId}` in data ? `velocity_limits${robotId}` : 'velocity_limits';
 
         if (data && data[positions_key]) {
             const robotGroup = (robotId === 1) ? robotGroup1 : robotGroup2;
             const jointAngles = data[angles_key];
             const violations = data[violations_key] || [];
+            const velocity_violations = data[velocity_violations_key] || [];
             const limits = data[limits_key] || {};
+            const velocity_limits = data[velocity_limits_key] || [];
             
-            updateRobot(robotGroup, data[positions_key], jointAngles, violations, limits);
+            updateRobot(robotGroup, data[positions_key], jointAngles, violations, limits, velocity_violations);
             
             if (ui[robotId] && jointAngles) {
                 if (robotId === 1) robot1Joints = jointAngles;
                 else robot2Joints = jointAngles;
                 
-                // Display joint angles with limit violation indicators
+                // Display joint angles with limit and velocity violation indicators
                 let jointDisplay = jointAngles.map((a, i) => {
                     const violation = violations.find(v => v.joint_index === i);
-                    if (violation) {
-                        return `J${i+1}=${a} <span style="color: red;">⚠️ LIMIT</span>`;
-                    }
-                    return `J${i+1}=${a}`;
+                    const velocity_violation = velocity_violations.find(v => v.joint_index === i);
+                    
+                    let indicators = [];
+                    if (violation) indicators.push('<span style="color: red;">⚠️ LIMIT</span>');
+                    if (velocity_violation) indicators.push('<span style="color: orange;">⚡ VEL</span>');
+                    
+                    return `J${i+1}=${a} ${indicators.join(' ')}`;
                 }).join("<br>");
                 
                 ui[robotId].joints.innerHTML = jointDisplay;
-                ui[robotId].status.textContent = violations.length > 0 ? 'Limit Violation' : 'Active';
-                ui[robotId].status.style.color = violations.length > 0 ? "red" : "green";
+                
+                // Update status based on both types of violations
+                const hasViolations = violations.length > 0 || velocity_violations.length > 0;
+                let statusText = 'Active';
+                if (violations.length > 0 && velocity_violations.length > 0) {
+                    statusText = 'Limit & Velocity Violation';
+                } else if (violations.length > 0) {
+                    statusText = 'Limit Violation';
+                } else if (velocity_violations.length > 0) {
+                    statusText = 'Velocity Violation';
+                }
+                
+                ui[robotId].status.textContent = statusText;
+                ui[robotId].status.style.color = hasViolations ? "red" : "green";
                 
                 // Display joint limits information
                 if (limits.lower && limits.upper && limits.names) {
@@ -390,8 +490,14 @@
                         const lower = (limits.lower[i] * 180 / Math.PI).toFixed(1);
                         const upper = (limits.upper[i] * 180 / Math.PI).toFixed(1);
                         const violation = violations.find(v => v.joint_index === i);
-                        const style = violation ? 'color: red; font-weight: bold;' : '';
-                        return `<span style="${style}">${name}: [${lower}°, ${upper}°]</span>`;
+                        const velocity_violation = velocity_violations.find(v => v.joint_index === i);
+                        const velocity_limit = velocity_limits[i] ? (velocity_limits[i] * 180 / Math.PI).toFixed(1) : 'N/A';
+                        
+                        let style = '';
+                        if (violation) style = 'color: red; font-weight: bold;';
+                        else if (velocity_violation) style = 'color: orange; font-weight: bold;';
+                        
+                        return `<span style="${style}">${name}: [${lower}°, ${upper}°] (vel: ${velocity_limit}°/s)</span>`;
                     }).join("<br>");
                     ui[robotId].limits.innerHTML = limitsDisplay;
                 }
@@ -463,6 +569,7 @@
             // Force a layout recalculation
             bottomContainer.offsetHeight;
             
+            // Left side - perspective view
             let pane3 = document.getElementById("mainThreejsView").parentElement;
             if (pane3 && r1_view && r1_view.renderer) {
                 r1_view.renderer.setSize(pane3.clientWidth, pane3.clientHeight);
@@ -470,18 +577,62 @@
                 r1_view.camera.updateProjectionMatrix();
             }
             
+            // Right side - perspective view
             let pane1 = document.getElementById("secondView").parentElement;
             if (pane1 && r2_view && r2_view.renderer) {
                 r2_view.renderer.setSize(pane1.clientWidth, pane1.clientHeight);
-                const aspect = pane1.clientWidth / pane1.clientHeight;
-                r2_view.camera.left = -0.12 * aspect; // Scaled from 120m to 0.12m (120mm)
-                r2_view.camera.right = 0.12 * aspect; // Scaled from 120m to 0.12m (120mm)
+                r2_view.camera.aspect = pane1.clientWidth / pane1.clientHeight;
                 r2_view.camera.updateProjectionMatrix();
             }
         }
     }
+    
+    // Tuning controls functionality
+    function setupTuningControls() {
+        // Robot 1 tuning
+        document.getElementById('applyTuning1').addEventListener('click', function() {
+            const scaleX = parseFloat(document.getElementById('scaleX1').value);
+            const scaleY = parseFloat(document.getElementById('scaleY1').value);
+            const scaleZ = parseFloat(document.getElementById('scaleZ1').value);
+            const offsetX = parseFloat(document.getElementById('offsetX1').value);
+            const offsetY = parseFloat(document.getElementById('offsetY1').value);
+            const offsetZ = parseFloat(document.getElementById('offsetZ1').value);
+            
+            // Send tuning parameters to Python backend
+            if (window.pywebview) {
+                window.pywebview.api.update_tuning_params(1, {
+                    scale: [scaleX, scaleY, scaleZ],
+                    offset: [offsetX, offsetY, offsetZ]
+                });
+            }
+            console.log('Applied Robot 1 tuning:', {scale: [scaleX, scaleY, scaleZ], offset: [offsetX, offsetY, offsetZ]});
+        });
+        
+        // Robot 2 tuning
+        document.getElementById('applyTuning2').addEventListener('click', function() {
+            const scaleX = parseFloat(document.getElementById('scaleX2').value);
+            const scaleY = parseFloat(document.getElementById('scaleY2').value);
+            const scaleZ = parseFloat(document.getElementById('scaleZ2').value);
+            const offsetX = parseFloat(document.getElementById('offsetX2').value);
+            const offsetY = parseFloat(document.getElementById('offsetY2').value);
+            const offsetZ = parseFloat(document.getElementById('offsetZ2').value);
+            
+            // Send tuning parameters to Python backend
+            if (window.pywebview) {
+                window.pywebview.api.update_tuning_params(2, {
+                    scale: [scaleX, scaleY, scaleZ],
+                    offset: [offsetX, offsetY, offsetZ]
+                });
+            }
+            console.log('Applied Robot 2 tuning:', {scale: [scaleX, scaleY, scaleZ], offset: [offsetX, offsetY, offsetZ]});
+        });
+    }
+    
     window.addEventListener('resize', onWindowResize);
-    window.addEventListener('pywebviewready', init);
+    window.addEventListener('pywebviewready', function() {
+        init();
+        setupTuningControls();
+    });
   </script>
 </body>
 </html>
