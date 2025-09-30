@@ -97,7 +97,7 @@ last_detection_robot1, last_detection_robot2 = 0, 0
 latest_ui_frame, latest_ui_frame_lock = None, threading.Lock()
 FIXED_POS_SCALE, FIXED_ANGLE_SCALE = np.array([-4,-1,-3]), np.array([-1.,-1.,-1.])  # Updated position scale for better end effector movement
 OFFSET_ROBOT1_POS, OFFSET_ROBOT1_ORI = np.array([-0.3,1,-0.4]), np.array([-90.,0.,0.])  #first is red axis,     , third is blue axis
-OFFSET_ROBOT2_POS, OFFSET_ROBOT2_ORI = np.array([0.3,1,-0.4]), np.array([-90.,0.,0.])  # Y-axis moved down 200mm (1.5 + 0.2)
+OFFSET_ROBOT2_POS, OFFSET_ROBOT2_ORI = np.array([-0.3,1,-0.4]), np.array([-90.,0.,0.])  # Y-axis moved down 200mm (1.5 + 0.2)
 ARUCO_MAPPING = {'x':0,'y':2,'z':1,'roll':0,'pitch':2,'yaw':1}
 filter_history = {'1':{k:deque(maxlen=8) for k in ARUCO_MAPPING}, '2':{k:deque(maxlen=8) for k in ARUCO_MAPPING}}
 # Store last smoothed values for velocity-based smoothing
@@ -135,7 +135,7 @@ def check_joint_limit_violations(joint_angles, robot_info):
             })
     return violations
 
-def validate_joint_velocities(current_angles, target_angles, robot_info, dt=None):
+def validate_joint_velocities(current_angles, target_angles, robot_info, dt=0.01):
     """Validate joint velocities against limits and return clamped target angles - OPTIMIZED"""
     try:
         if len(current_angles) != len(target_angles):
@@ -160,16 +160,9 @@ def validate_joint_velocities(current_angles, target_angles, robot_info, dt=None
         # Calculate required time to reach each target at maximum velocity
         required_times = distances / velocity_limits
         
-        # Use the maximum required time to ensure constant velocity
+        # Use the maximum required time, but clamp it to reasonable bounds
         max_required_time = np.max(required_times)
-        
-        # If dt is provided, use it; otherwise use dynamic time calculation
-        if dt is not None:
-            # Use provided dt but ensure we don't exceed velocity limits
-            max_required_time = max(max_required_time, dt)
-        else:
-            # Use dynamic time calculation - only clamp to minimum to prevent division by zero
-            max_required_time = max(0.001, max_required_time)  # Minimum 1ms, no upper limit
+        max_required_time = max(0.001, min(0.1, max_required_time))  # Clamp between 1ms and 100ms
         
         # Calculate velocities using the dynamic time
         velocities = distances / max_required_time
@@ -528,9 +521,12 @@ class API:
                 "velocity_limits": rob_info["velocity_limits"]
             }
         
-        # Let the velocity validation function calculate optimal time dynamically
-        # This ensures maximum velocity is always maintained
-        new_q, velocity_violations = pybullet_inverse_kinematics(rob_id, rob_info, x, y, z, roll, pitch, yaw, current_angles=q, dt=None)
+        # Use a reasonable time delta for velocity limiting
+        # The dynamic approach will calculate optimal time internally
+        dt = 1.0 / 60.0  # 60 FPS update rate - good balance for responsiveness
+        
+        # Always apply velocity limits but with optimized checking
+        new_q, velocity_violations = pybullet_inverse_kinematics(rob_id, rob_info, x, y, z, roll, pitch, yaw, current_angles=q, dt=dt)
         
         if new_q is not None and len(new_q) == len(q): q[:] = new_q
         pos = pybullet_forward_kinematics(rob_id, rob_info, q)
