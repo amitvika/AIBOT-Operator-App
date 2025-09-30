@@ -277,13 +277,13 @@
         const aspect = pane.clientWidth / pane.clientHeight;
         let camera;
         if (isPerspective) {
-            // Left side - perspective view (zoomed out 6x from original)
+            // Left side - front/back perspective view (zoomed out 6x from original)
             camera = new THREE.PerspectiveCamera(65, aspect, 0.0001, 20.0);
             camera.position.set(0, -0.6, 0.48); // Zoomed out 6x from original position
         } else {
-            // Right side - perspective view (zoomed out 6x from original)
+            // Right side - lateral (side) view
             camera = new THREE.PerspectiveCamera(65, aspect, 0.0001, 20.0);
-            camera.position.set(0, -0.6, 0.48); // Zoomed out 6x from original position
+            camera.position.set(-0.6, 0, 0.48); // Lateral view from the side
         }
         camera.lookAt(0,0,0);
         
