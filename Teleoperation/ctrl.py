@@ -95,9 +95,9 @@ webview_window, latest_serial_data = None, "controller not connected"
 robot1_zeroing, robot2_zeroing = False, False
 last_detection_robot1, last_detection_robot2 = 0, 0
 latest_ui_frame, latest_ui_frame_lock = None, threading.Lock()
-FIXED_POS_SCALE, FIXED_ANGLE_SCALE = np.array([-4,-1,-3]), np.array([-1.,-1.,-1.])  # Updated position scale for better end effector movement
-OFFSET_ROBOT1_POS, OFFSET_ROBOT1_ORI = np.array([-0.3,1,-0.4]), np.array([-90.,0.,0.])  #first is red axis,     , third is blue axis
-OFFSET_ROBOT2_POS, OFFSET_ROBOT2_ORI = np.array([-0.3,1,-0.4]), np.array([-90.,0.,0.])  # Y-axis moved down 200mm (1.5 + 0.2)
+FIXED_POS_SCALE, FIXED_ANGLE_SCALE = np.array([-4,-1,-2]), np.array([-1.,-1.,-1.])  # Updated position scale for better end effector movement
+OFFSET_ROBOT1_POS, OFFSET_ROBOT1_ORI = np.array([-0.3, 1,-0.4]), np.array([-90.,0.,0.])  #first is red axis,     , third is blue axis
+OFFSET_ROBOT2_POS, OFFSET_ROBOT2_ORI = np.array([0.3 , 1,-0.4]), np.array([-90.,0.,0.])  # Y-axis moved down 200mm (1.5 + 0.2)
 ARUCO_MAPPING = {'x':0,'y':2,'z':1,'roll':0,'pitch':2,'yaw':1}
 filter_history = {'1':{k:deque(maxlen=8) for k in ARUCO_MAPPING}, '2':{k:deque(maxlen=8) for k in ARUCO_MAPPING}}
 # Store last smoothed values for velocity-based smoothing
