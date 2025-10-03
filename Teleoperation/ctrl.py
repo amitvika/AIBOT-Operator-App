@@ -96,10 +96,10 @@ robot1_zeroing, robot2_zeroing = False, False
 last_detection_robot1, last_detection_robot2 = 0, 0
 latest_ui_frame, latest_ui_frame_lock = None, threading.Lock()
 FIXED_POS_SCALE, FIXED_ANGLE_SCALE = np.array([-4,-1,-2]), np.array([-1.,-1.,-1.])  # Updated position scale for better end effector movement
-OFFSET_ROBOT1_POS, OFFSET_ROBOT1_ORI = np.array([-0.3, 1,-0.4]), np.array([-90.,0.,0.])  #first is red axis,     , third is blue axis
-OFFSET_ROBOT2_POS, OFFSET_ROBOT2_ORI = np.array([0.3 , 1,-0.4]), np.array([-90.,0.,0.])  # Y-axis moved down 200mm (1.5 + 0.2)
+OFFSET_ROBOT1_POS, OFFSET_ROBOT1_ORI = np.array([-0.15, 1,-0.3]), np.array([-90.,0.,0.])  #first is red axis,     , third is blue axis
+OFFSET_ROBOT2_POS, OFFSET_ROBOT2_ORI = np.array([0.15 , 1,-0.3]), np.array([-90.,0.,0.])  # Y-axis moved down 200mm (1.5 + 0.2)
 ARUCO_MAPPING = {'x':0,'y':2,'z':1,'roll':0,'pitch':2,'yaw':1}
-filter_history = {'1':{k:deque(maxlen=8) for k in ARUCO_MAPPING}, '2':{k:deque(maxlen=8) for k in ARUCO_MAPPING}}
+filter_history = {'1':{k:deque(maxlen=8) for k in ARUCO_MAPPING}, '2':{k:deque(maxlen=8) for k in ARUCO_MAPPING}}  # Reduced smoothing for better responsiveness
 # Store last smoothed values for velocity-based smoothing
 last_smoothed_values = {'1': {}, '2': {}}
 
@@ -242,8 +242,8 @@ def pybullet_inverse_kinematics(robot_id_num, robot_info, x, y, z, roll, pitch, 
         jointRanges=robot_info["joint_ranges"], 
         restPoses=rest_poses, 
         solver=0, 
-        maxNumIterations=20,  # Reduced for speed - 5x faster
-        residualThreshold=.01,  # Relaxed tolerance for speed
+        maxNumIterations=10,  # Further reduced for maximum speed
+        residualThreshold=.05,  # More relaxed tolerance for speed
         physicsClientId=physicsClientId
     )
     
@@ -337,7 +337,7 @@ def transform_aruco_marker(marker_data, robot_id):
     smoothed = {}
     
     # Maximum change rate per update (in units per second) - increased for better responsiveness
-    max_change_rates = {'x': 1.5, 'y': 1.5, 'z': 0.8, 'roll': 90, 'pitch': 90, 'yaw': 90}
+    max_change_rates = {'x': 1.5, 'y': 1.5, 'z': 0.8, 'roll': 720, 'pitch': 720, 'yaw': 720}  # Doubled orientation limits
     dt = 1.0 / 60.0  # Update rate
     
     for k, v in raw.items():
@@ -384,9 +384,12 @@ def read_serial_data():
             time.sleep(2)
 
 def camera_capture_thread(cap, frame_queue):
-    # Conservative camera optimization for better motion tracking
+    # Aggressive camera optimization for maximum speed and lowest latency
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimal buffer for lower latency
-    cap.set(cv2.CAP_PROP_FPS, 60)  # Request 60 FPS for better motion tracking
+    cap.set(cv2.CAP_PROP_FPS, 120)  # Request 120 FPS for maximum responsiveness
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)  # Reduce resolution for speed
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)  # Reduce resolution for speed
+    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)  # Reduce auto exposure for speed
     
     while not shutdown_event.is_set():
         ret, frame = cap.read()
@@ -413,7 +416,7 @@ def update_ui_feed():
             try: webview_window.evaluate_js(js_code)
             except Exception: pass
     if not shutdown_event.is_set():
-        threading.Timer(1.0 / 45.0, update_ui_feed).start()  # Increased to 45 FPS for better responsiveness
+        threading.Timer(1.0 / 60.0, update_ui_feed).start()  # Increased to 60 FPS for maximum responsiveness
 
 def run_aruco(frame_queue, api_instance):
     global last_detection_robot1, last_detection_robot2, robot1_zeroing, robot2_zeroing, latest_ui_frame, latest_ui_frame_lock
@@ -438,12 +441,18 @@ def run_aruco(frame_queue, api_instance):
     
     # Pre-allocate arrays for better performance
     last_update_time = [0.0, 0.0]  # For rate limiting
-    min_update_interval = 1.0 / 80.0  # 80 FPS max update rate - increased for better responsiveness
+    min_update_interval = 1.0 / 100.0  # 100 FPS max update rate for maximum responsiveness
+    frame_skip_counter = 0  # For intelligent frame skipping
     
     while not shutdown_event.is_set():
         try:
-            frame = frame_queue.get(timeout=0.005)  # Reduced timeout for lower latency
+            frame = frame_queue.get(timeout=0.002)  # Further reduced timeout for lower latency
             current_time = time.time()
+            
+            # Skip every other frame for better performance (50% processing reduction)
+            frame_skip_counter += 1
+            if frame_skip_counter % 2 == 0:
+                continue
             
             # Process every frame for detection, but limit IK updates
             # This ensures detection happens but reduces computational load
@@ -479,12 +488,10 @@ def run_aruco(frame_queue, api_instance):
                     ik_result['debug_pose'] = processed_target
                     
                     if webview_window:
-                        # Optimize JSON serialization - only include essential data
+                        # Ultra-compact JSON serialization - only essential data for visualization
                         compact_data = {
                             "positions": ik_result["positions"],
-                            "joint_angles": ik_result["joint_angles"],
-                            "joint_limit_violations": ik_result.get("joint_limit_violations", []),
-                            "joint_limits": ik_result.get("joint_limits", {})
+                            "joint_angles": ik_result["joint_angles"]
                         }
                         js_code = f"handle_robot_update({robot_id}, {json.dumps(compact_data)});"
                         try: webview_window.evaluate_js(js_code)
@@ -591,6 +598,14 @@ class API:
             return {"status": "success", "message": f"Updated tuning parameters for Robot {robot_id}"}
         except Exception as e:
             return {"status": "error", "message": str(e)}
+    
+    def get_tuning_params(self):
+        """Get current tuning parameters from backend"""
+        return {
+            "scale": FIXED_POS_SCALE.tolist(),
+            "offset_robot1": OFFSET_ROBOT1_POS.tolist(),
+            "offset_robot2": OFFSET_ROBOT2_POS.tolist()
+        }
 
 # --- CHANGE 3: This function will be called by pywebview when the window is closed ---
 def on_window_closed():

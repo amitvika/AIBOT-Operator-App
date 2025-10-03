@@ -26,7 +26,7 @@
         padding: 4px 4px 2px 4px;
         box-sizing: border-box;
     }
-    
+
     #bottomToggle {
         height: 30px;
         background: #555;
@@ -166,7 +166,7 @@
           <div class="tuning-controls">
             <label>Left/Right Scale: <input type="number" id="scaleX1" value="-4" step="0.1" style="width: 60px;"></label><br>
             <label>In/Out Scale: <input type="number" id="scaleY1" value="-1" step="0.1" style="width: 60px;"></label><br>
-            <label>Up/Down Scale: <input type="number" id="scaleZ1" value="-3" step="0.1" style="width: 60px;"></label><br>
+            <label>Up/Down Scale: <input type="number" id="scaleZ1" value="-2" step="0.1" style="width: 60px;"></label><br>
             <label>Left/Right Offset: <input type="number" id="offsetX1" value="-0.3" step="0.1" style="width: 60px;"></label><br>
             <label>In/Out Offset: <input type="number" id="offsetY1" value="1" step="0.1" style="width: 60px;"></label><br>
             <label>Up/Down Offset: <input type="number" id="offsetZ1" value="-0.4" step="0.1" style="width: 60px;"></label><br>
@@ -193,8 +193,8 @@
           <div class="tuning-controls">
             <label>Left/Right Scale: <input type="number" id="scaleX2" value="-4" step="0.1" style="width: 60px;"></label><br>
             <label>In/Out Scale: <input type="number" id="scaleY2" value="-1" step="0.1" style="width: 60px;"></label><br>
-            <label>Up/Down Scale: <input type="number" id="scaleZ2" value="-3" step="0.1" style="width: 60px;"></label><br>
-            <label>Left/Right Offset: <input type="number" id="offsetX2" value="-0.3" step="0.1" style="width: 60px;"></label><br>
+            <label>Up/Down Scale: <input type="number" id="scaleZ2" value="-2" step="0.1" style="width: 60px;"></label><br>
+            <label>Left/Right Offset: <input type="number" id="offsetX2" value="0.3" step="0.1" style="width: 60px;"></label><br>
             <label>In/Out Offset: <input type="number" id="offsetY2" value="1" step="0.1" style="width: 60px;"></label><br>
             <label>Up/Down Offset: <input type="number" id="offsetZ2" value="-0.4" step="0.1" style="width: 60px;"></label><br>
             <button id="applyTuning2" style="margin-top: 5px;">Apply Changes</button>
@@ -205,12 +205,22 @@
   
   <div id="bottomToggle">
     <button id="bottomToggleButton">Hide Bottom Panel</button>
+    <button id="fullscreenBtn1" style="margin-left: 10px; background: #777; color: white; border: none; padding: 4px 12px; border-radius: 3px; cursor: pointer; font-size: 12px; font-weight: bold;">Fullscreen View</button>
   </div>
   
   <div id="bottomContainer">
     <div id="pane1"><canvas id="mainThreejsView"></canvas></div>
     <div id="pane2"><img id="aruco_feed"></div>
     <div id="pane3"><canvas id="secondView"></canvas></div>
+  </div>
+  
+  <!-- Fullscreen Three.js View -->
+  <div id="fullscreenContainer" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #000; z-index: 1000;">
+    <canvas id="fullscreenThreejsView" style="width: 100%; height: 100%;"></canvas>
+    <div id="fullscreenArUcoPanel" style="position: absolute; top: 20px; right: 20px; width: 200px; height: 150px; background: rgba(0,0,0,0.8); border-radius: 8px; overflow: hidden; border: 2px solid #fff;">
+      <img id="fullscreenArUcoFeed" style="width: 100%; height: 100%; object-fit: contain;">
+    </div>
+    <button id="exitFullscreenBtn" style="position: absolute; top: 20px; left: 20px; background: #f44336; color: white; border: none; padding: 10px 15px; border-radius: 5px; cursor: pointer; font-size: 14px; font-weight: bold;">Exit Fullscreen</button>
   </div>
   
   <script>
@@ -229,9 +239,10 @@
         }
     };
     
-    let scene, r1_view, r2_view;
+    let scene, r1_view, r2_view, fullscreen_view;
     let robotGroup1, robotGroup2;
     let robot1Joints = [0,0,0,0,0,0], robot2Joints = [0,0,0,0,0,0];
+    let isFullscreen = false;
     
     // Bottom panel toggle state
     let bottomPanelHidden = false;
@@ -281,9 +292,10 @@
             camera = new THREE.PerspectiveCamera(65, aspect, 0.0001, 20.0);
             camera.position.set(0, -0.6, 0.48); // Zoomed out 6x from original position
         } else {
-            // Right side - perspective view (zoomed out 6x from original)
+            // Right side - side view looking at green and blue axis plane
             camera = new THREE.PerspectiveCamera(65, aspect, 0.0001, 20.0);
-            camera.position.set(0, -0.6, 0.48); // Zoomed out 6x from original position
+            camera.position.set(-0.8, 0, 0.2); // Positioned further back and lower for better side view
+            camera.up.set(0, 0, 1); // Set blue axis (Z) as up direction
         }
         camera.lookAt(0,0,0);
         
@@ -308,6 +320,7 @@
 
         r1_view = setupView('mainThreejsView', true);
         r2_view = setupView('secondView', false);
+        fullscreen_view = setupView('fullscreenThreejsView', true);
         
         onWindowResize();
         animate();
@@ -343,7 +356,7 @@
         // Update joint positions (first 7 positions: base + 6 joints)
         for (let i = 0; i < Math.min(positions.length, 7); i++) {
             const pos = positions[i];
-            grp.children[i].position.set(pos[0], pos[1], pos[2]);
+                grp.children[i].position.set(pos[0], pos[1], pos[2]);
             points[i * 3] = pos[0];
             points[i * 3 + 1] = pos[1];
             points[i * 3 + 2] = pos[2];
@@ -410,6 +423,12 @@
         r1_view.renderer.render(scene, r1_view.camera);
         r2_view.controls.update();
         r2_view.renderer.render(scene, r2_view.camera);
+        
+        // Render fullscreen view if active
+        if (isFullscreen && fullscreen_view) {
+            fullscreen_view.controls.update();
+            fullscreen_view.renderer.render(scene, fullscreen_view.camera);
+        }
     }
 
     // *** OPTIMIZATION: This function is called from Python and just stores the latest data ***
@@ -560,9 +579,24 @@
     document.getElementById("zeroBtn2").addEventListener("click", () => {
         if(window.pywebview) window.pywebview.api.go_to_zero_robot2().then(res => handle_robot_update(2, res));
     });
+    
+    // Fullscreen functionality
+    document.getElementById("fullscreenBtn1").addEventListener("click", () => {
+        enterFullscreen();
+    });
+    document.getElementById("exitFullscreenBtn").addEventListener("click", () => {
+        exitFullscreen();
+    });
 
     function onWindowResize(){
         const bottomContainer = document.getElementById('bottomContainer');
+        
+        // Handle fullscreen resize
+        if (isFullscreen && fullscreen_view) {
+            fullscreen_view.renderer.setSize(window.innerWidth, window.innerHeight);
+            fullscreen_view.camera.aspect = window.innerWidth / window.innerHeight;
+            fullscreen_view.camera.updateProjectionMatrix();
+        }
         
         // Only update Three.js renderers if bottom panel is not hidden
         if (!bottomContainer.classList.contains('hidden')) {
@@ -570,20 +604,49 @@
             bottomContainer.offsetHeight;
             
             // Left side - perspective view
-            let pane3 = document.getElementById("mainThreejsView").parentElement;
+        let pane3 = document.getElementById("mainThreejsView").parentElement;
             if (pane3 && r1_view && r1_view.renderer) {
-                r1_view.renderer.setSize(pane3.clientWidth, pane3.clientHeight);
-                r1_view.camera.aspect = pane3.clientWidth / pane3.clientHeight;
-                r1_view.camera.updateProjectionMatrix();
+        r1_view.renderer.setSize(pane3.clientWidth, pane3.clientHeight);
+        r1_view.camera.aspect = pane3.clientWidth / pane3.clientHeight;
+        r1_view.camera.updateProjectionMatrix();
             }
-            
+        
             // Right side - perspective view
-            let pane1 = document.getElementById("secondView").parentElement;
+        let pane1 = document.getElementById("secondView").parentElement;
             if (pane1 && r2_view && r2_view.renderer) {
-                r2_view.renderer.setSize(pane1.clientWidth, pane1.clientHeight);
+        r2_view.renderer.setSize(pane1.clientWidth, pane1.clientHeight);
                 r2_view.camera.aspect = pane1.clientWidth / pane1.clientHeight;
-                r2_view.camera.updateProjectionMatrix();
-            }
+        r2_view.camera.updateProjectionMatrix();
+    }
+        }
+    }
+    
+    // Function to fetch and populate tuning parameters from backend
+    function fetchAndPopulateTuningParams() {
+        if (window.pywebview && window.pywebview.api.get_tuning_params) {
+            window.pywebview.api.get_tuning_params().then(params => {
+                console.log('Fetched tuning parameters:', params);
+                
+                // Update Robot 1 input boxes
+                document.getElementById('scaleX1').value = params.scale[0];
+                document.getElementById('scaleY1').value = params.scale[1];
+                document.getElementById('scaleZ1').value = params.scale[2];
+                document.getElementById('offsetX1').value = params.offset_robot1[0];
+                document.getElementById('offsetY1').value = params.offset_robot1[1];
+                document.getElementById('offsetZ1').value = params.offset_robot1[2];
+                
+                // Update Robot 2 input boxes
+                document.getElementById('scaleX2').value = params.scale[0];
+                document.getElementById('scaleY2').value = params.scale[1];
+                document.getElementById('scaleZ2').value = params.scale[2];
+                document.getElementById('offsetX2').value = params.offset_robot2[0];
+                document.getElementById('offsetY2').value = params.offset_robot2[1];
+                document.getElementById('offsetZ2').value = params.offset_robot2[2];
+                
+                console.log('Updated input boxes with current backend values');
+            }).catch(error => {
+                console.error('Error fetching tuning parameters:', error);
+            });
         }
     }
     
@@ -628,10 +691,61 @@
         });
     }
     
+    // Fullscreen functions
+    function enterFullscreen() {
+        isFullscreen = true;
+        document.getElementById('fullscreenContainer').style.display = 'block';
+        
+        // Resize fullscreen renderer to full window size
+        if (fullscreen_view) {
+            fullscreen_view.renderer.setSize(window.innerWidth, window.innerHeight);
+            fullscreen_view.camera.aspect = window.innerWidth / window.innerHeight;
+            fullscreen_view.camera.updateProjectionMatrix();
+            
+            // Copy camera settings from main view to fullscreen view
+            if (r1_view) {
+                fullscreen_view.camera.position.copy(r1_view.camera.position);
+                fullscreen_view.camera.quaternion.copy(r1_view.camera.quaternion);
+                fullscreen_view.controls.update();
+            }
+        }
+        
+        // Start copying ArUco feed to fullscreen panel
+        startFullscreenArUcoFeed();
+    }
+    
+    function exitFullscreen() {
+        isFullscreen = false;
+        document.getElementById('fullscreenContainer').style.display = 'none';
+        stopFullscreenArUcoFeed();
+    }
+    
+    function startFullscreenArUcoFeed() {
+        const fullscreenArUcoFeed = document.getElementById('fullscreenArUcoFeed');
+        const arucoFeed = document.getElementById('aruco_feed');
+        
+        // Copy the ArUco feed to fullscreen panel
+        function updateFullscreenArUco() {
+            if (isFullscreen && arucoFeed.src) {
+                fullscreenArUcoFeed.src = arucoFeed.src;
+            }
+            if (isFullscreen) {
+                requestAnimationFrame(updateFullscreenArUco);
+            }
+        }
+        updateFullscreenArUco();
+    }
+    
+    function stopFullscreenArUcoFeed() {
+        // Stop the ArUco feed copying
+    }
+    
     window.addEventListener('resize', onWindowResize);
     window.addEventListener('pywebviewready', function() {
         init();
         setupTuningControls();
+        // Fetch and populate tuning parameters after setup
+        fetchAndPopulateTuningParams();
     });
   </script>
 </body>
