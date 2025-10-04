@@ -552,6 +552,23 @@
         }
     }
 
+    // Continuous controller data transmission - independent of ArUco detection
+    function sendControllerDataContinuously() {
+        if (window.pywebview) {
+            window.pywebview.api.get_latest_serial().then(res => {
+                const serialData = res.serial || "";
+                const iframe = document.querySelector("#centerPane iframe");
+                if (iframe && serialData) {
+                    // Send just the controller data without robot joint data
+                    const controlString = "mac=asda;" + serialData + ";";
+                    iframe.contentWindow.postMessage({ controlString: controlString }, "*");
+                }
+            });
+        }
+        // Send controller data every 100ms regardless of ArUco detection
+        setTimeout(sendControllerDataContinuously, 100);
+    }
+
     // --- Bottom Panel Toggle Functions ---
     function initializeBottomPanelToggle() {
         const toggleButton = document.getElementById('bottomToggleButton');
@@ -746,6 +763,8 @@
         setupTuningControls();
         // Fetch and populate tuning parameters after setup
         fetchAndPopulateTuningParams();
+        // Start continuous controller data transmission
+        sendControllerDataContinuously();
     });
   </script>
 </body>
