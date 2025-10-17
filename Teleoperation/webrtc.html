@@ -72,9 +72,9 @@
       background: rgba(255, 255, 255, 0.6);
     }
     
-    /* Chat section on the right side */
+    /* Debug Panel section on the right side */
     #chat-section {
-      width: 300px;
+      width: 380px;
       background: #f5f5f5;
       border-left: 2px solid #ddd;
       display: flex;
@@ -90,37 +90,39 @@
     }
     
     #chat-header {
-      background: #e0e0e0;
-      padding: 8px 12px;
-      border-bottom: 1px solid #ccc;
+      background: #2c3e50;
+      padding: 10px 12px;
+      border-bottom: 1px solid #34495e;
       font-weight: bold;
-      color: #333;
-      font-size: 14px;
+      color: #ecf0f1;
+      font-size: 15px;
       display: flex;
       justify-content: space-between;
       align-items: center;
     }
     
     #chat-toggle {
-      background: #666;
+      background: #e74c3c;
       color: white;
       border: none;
-      padding: 4px 8px;
+      padding: 5px 10px;
       border-radius: 3px;
       cursor: pointer;
       font-size: 12px;
+      font-weight: bold;
+      transition: background 0.2s;
     }
     
     #chat-toggle:hover {
-      background: #555;
+      background: #c0392b;
     }
     
-    /* Floating toggle button when chat is hidden */
+    /* Floating toggle button when debug panel is hidden */
     #floating-chat-toggle {
       position: fixed;
       top: 20px;
       right: 20px;
-      background: #4CAF50;
+      background: #3498db;
       color: white;
       border: none;
       padding: 10px 15px;
@@ -134,7 +136,7 @@
     }
     
     #floating-chat-toggle:hover {
-      background: #45a049;
+      background: #2980b9;
       transform: translateY(-2px);
       box-shadow: 0 4px 15px rgba(0,0,0,0.4);
     }
@@ -147,57 +149,193 @@
       flex: 1;
       display: flex;
       flex-direction: column;
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
+    
+    #chat-content::-webkit-scrollbar {
+      width: 8px;
+    }
+    
+    #chat-content::-webkit-scrollbar-track {
+      background: #f1f1f1;
+    }
+    
+    #chat-content::-webkit-scrollbar-thumb {
+      background: #bdc3c7;
+      border-radius: 4px;
+    }
+    
+    #chat-content::-webkit-scrollbar-thumb:hover {
+      background: #95a5a6;
+    }
+    
+    /* Control String Display */
+    .debug-section {
+      background: #fff;
+      margin: 10px;
       padding: 10px;
-      gap: 10px;
-      overflow: hidden;
+      border-radius: 5px;
+      border: 1px solid #ddd;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    
+    .debug-section-title {
+      font-weight: bold;
+      font-size: 13px;
+      color: #2c3e50;
+      margin-bottom: 8px;
+      padding-bottom: 5px;
+      border-bottom: 2px solid #3498db;
     }
     
     #control-string {
-      background: #fff;
-      border: 1px solid #ccc;
+      background: #ecf0f1;
+      border: 1px solid #bdc3c7;
       border-radius: 3px;
-      font-family: monospace;
+      font-family: 'Courier New', monospace;
       padding: 8px;
-      font-size: 12px;
-      color: #333;
-      max-height: 60px;
+      font-size: 11px;
+      color: #2c3e50;
+      max-height: 80px;
       overflow-y: auto;
       word-wrap: break-word;
       word-break: break-all;
       white-space: pre-wrap;
     }
     
-    #incoming-messages {
-      background: #fff;
-      border: 1px solid #ccc;
-      border-radius: 3px;
-      padding: 8px;
-      flex: 1;
-      overflow-y: auto;
-      font-family: monospace;
+    /* Tuning Controls */
+    .tuning-control {
+      margin-bottom: 12px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #ecf0f1;
+    }
+    
+    .tuning-control:last-child {
+      border-bottom: none;
+      margin-bottom: 0;
+      padding-bottom: 0;
+    }
+    
+    .tuning-label {
       font-size: 12px;
-      color: #333;
-      word-wrap: break-word;
-      word-break: break-word;
-      white-space: pre-wrap;
+      font-weight: 600;
+      color: #34495e;
+      margin-bottom: 5px;
+      display: block;
     }
     
-    #incoming-messages::-webkit-scrollbar {
-      width: 8px;
+    .tuning-description {
+      font-size: 10px;
+      color: #7f8c8d;
+      margin-bottom: 5px;
+      font-style: italic;
     }
     
-    #incoming-messages::-webkit-scrollbar-track {
-      background: #f1f1f1;
-      border-radius: 4px;
+    .tuning-input-group {
+      display: flex;
+      gap: 5px;
+      align-items: center;
     }
     
-    #incoming-messages::-webkit-scrollbar-thumb {
-      background: #c1c1c1;
-      border-radius: 4px;
+    .tuning-input {
+      flex: 1;
+      padding: 6px 8px;
+      border: 1px solid #bdc3c7;
+      border-radius: 3px;
+      font-size: 12px;
+      font-family: 'Courier New', monospace;
+      background: #fff;
     }
     
-    #incoming-messages::-webkit-scrollbar-thumb:hover {
-      background: #a8a8a8;
+    .tuning-input:focus {
+      outline: none;
+      border-color: #3498db;
+      box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
+    }
+    
+    .tuning-btn {
+      padding: 6px 12px;
+      background: #3498db;
+      color: white;
+      border: none;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: bold;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+    
+    .tuning-btn:hover {
+      background: #2980b9;
+      transform: translateY(-1px);
+      box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    }
+    
+    .tuning-btn:active {
+      transform: translateY(0);
+    }
+    
+    .tuning-btn.special {
+      background: #e74c3c;
+    }
+    
+    .tuning-btn.special:hover {
+      background: #c0392b;
+    }
+    
+    /* Toggle switch for boolean values */
+    .toggle-switch {
+      position: relative;
+      display: inline-block;
+      width: 44px;
+      height: 24px;
+      flex-shrink: 0;
+    }
+    
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    
+    .toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #95a5a6;
+      transition: 0.3s;
+      border-radius: 24px;
+    }
+    
+    .toggle-slider:before {
+      position: absolute;
+      content: "";
+      height: 18px;
+      width: 18px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: 0.3s;
+      border-radius: 50%;
+    }
+    
+    input:checked + .toggle-slider {
+      background-color: #27ae60;
+    }
+    
+    input:checked + .toggle-slider:before {
+      transform: translateX(20px);
+    }
+    
+    .toggle-label {
+      font-size: 11px;
+      color: #7f8c8d;
+      margin-left: 5px;
     }
   </style>
 </head>
@@ -214,21 +352,134 @@
       </div>
     </div>
     
-    <!-- Chat Section -->
+    <!-- Debug Panel Section -->
     <div id="chat-section">
       <div id="chat-header">
-        <span>Control & Messages</span>
+        <span>🔧 Actuator Debug Panel</span>
         <button id="chat-toggle">Hide</button>
       </div>
       <div id="chat-content">
-        <div id="control-string"></div>
-        <div id="incoming-messages"></div>
+        <!-- Current Control String Display -->
+        <div class="debug-section">
+          <div class="debug-section-title">📡 Current Control String</div>
+          <div id="control-string"></div>
+        </div>
+        
+        <!-- Tuning Commands Section -->
+        <div class="debug-section">
+          <div class="debug-section-title">⚙️ Wheel Actuator Tuning</div>
+          
+          <!-- Actuator Selection and Retrieve -->
+          <div class="tuning-control" style="background: #e8f4f8; padding: 10px; border-radius: 5px; margin-bottom: 15px;">
+            <label class="tuning-label">📡 Select Actuator</label>
+            <div class="tuning-description">Choose actuator to configure (decimal address)</div>
+            <div class="tuning-input-group">
+              <select id="actuator-id-select" class="tuning-input" style="flex: 2;">
+                <option value="512">Wheel Actuator 1 (0x200 / 512)</option>
+                <option value="768">Wheel Actuator 2 (0x300 / 768)</option>
+                <option value="1024">Wheel Actuator 3 (0x400 / 1024)</option>
+                <option value="65535">All Actuators (Broadcast)</option>
+              </select>
+              <button class="tuning-btn" onclick="retrieveTelemetry()" style="background: #27ae60;">📥 Retrieve</button>
+            </div>
+            <div id="telemetry-status" style="font-size: 10px; color: #7f8c8d; margin-top: 5px; font-style: italic;">
+              Click "Retrieve" to load current values from actuator
+            </div>
+          </div>
+          
+          <!-- CAN Address -->
+          <div class="tuning-control">
+            <label class="tuning-label">CAN Address</label>
+            <div class="tuning-description">Set device CAN address (decimal, e.g., 512 for 0x200)</div>
+            <div class="tuning-input-group">
+              <input type="number" id="tune-address" class="tuning-input" placeholder="512" min="0" max="2047" step="1">
+              <button class="tuning-btn" onclick="sendTuningCommand('tune_address', 'number')">Send</button>
+            </div>
+          </div>
+          
+          <!-- Actuator Setpoint -->
+          <div class="tuning-control">
+            <label class="tuning-label">Actuator Setpoint</label>
+            <div class="tuning-description">Zero position offset in degrees</div>
+            <div class="tuning-input-group">
+              <input type="number" id="tune-setpoint" class="tuning-input" placeholder="0.0" step="0.1" min="-360" max="360">
+              <button class="tuning-btn" onclick="sendTuningCommand('tune_setpoint', 'float')">Send</button>
+            </div>
+          </div>
+          
+          <!-- Motor Direction -->
+          <div class="tuning-control">
+            <label class="tuning-label">Motor Direction</label>
+            <div class="tuning-description">Invert motor direction</div>
+            <div class="tuning-input-group">
+              <label class="toggle-switch">
+                <input type="checkbox" id="tune-motor-dir">
+                <span class="toggle-slider"></span>
+              </label>
+              <span class="toggle-label" id="motor-dir-label">Normal</span>
+              <button class="tuning-btn" onclick="sendTuningCommand('tune_motor_dir', 'boolean')">Send</button>
+            </div>
+          </div>
+          
+          <!-- Sensor Direction -->
+          <div class="tuning-control">
+            <label class="tuning-label">Sensor Direction</label>
+            <div class="tuning-description">Invert sensor count direction</div>
+            <div class="tuning-input-group">
+              <label class="toggle-switch">
+                <input type="checkbox" id="tune-sensor-dir">
+                <span class="toggle-slider"></span>
+              </label>
+              <span class="toggle-label" id="sensor-dir-label">Normal</span>
+              <button class="tuning-btn" onclick="sendTuningCommand('tune_sensor_dir', 'boolean')">Send</button>
+            </div>
+          </div>
+          
+          <!-- P Gain -->
+          <div class="tuning-control">
+            <label class="tuning-label">P Gain</label>
+            <div class="tuning-description">Proportional gain value (3.0-10.0 typical)</div>
+            <div class="tuning-input-group">
+              <input type="number" id="tune-p" class="tuning-input" placeholder="5.0" step="0.1" min="0" max="100">
+              <button class="tuning-btn" onclick="sendTuningCommand('tune_p', 'float')">Send</button>
+            </div>
+          </div>
+          
+          <!-- Max PWM -->
+          <div class="tuning-control">
+            <label class="tuning-label">Maximum PWM</label>
+            <div class="tuning-description">Maximum PWM value (0-255)</div>
+            <div class="tuning-input-group">
+              <input type="number" id="tune-max-pwm" class="tuning-input" placeholder="255" min="0" max="255" step="5">
+              <button class="tuning-btn" onclick="sendTuningCommand('tune_max_pwm', 'number')">Send</button>
+            </div>
+          </div>
+          
+          <!-- Min PWM -->
+          <div class="tuning-control">
+            <label class="tuning-label">Minimum PWM (Deadzone)</label>
+            <div class="tuning-description">Minimum PWM value (0-255, typically 30-40)</div>
+            <div class="tuning-input-group">
+              <input type="number" id="tune-min-pwm" class="tuning-input" placeholder="30" min="0" max="255" step="5">
+              <button class="tuning-btn" onclick="sendTuningCommand('tune_min_pwm', 'number')">Send</button>
+            </div>
+          </div>
+          
+          <!-- Save Parameters -->
+          <div class="tuning-control">
+            <label class="tuning-label">Save to EEPROM</label>
+            <div class="tuning-description">Persist current parameters to ESP32 flash memory</div>
+            <div class="tuning-input-group">
+              <button class="tuning-btn special" onclick="sendTuningCommand('tune_save', 'save')" style="flex: 1;">💾 Save Parameters</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
   
-  <!-- Floating toggle button for when chat is hidden -->
-  <button id="floating-chat-toggle" class="hidden">Show Chat</button>
+  <!-- Floating toggle button for when debug panel is hidden -->
+  <button id="floating-chat-toggle" class="hidden">Show Debug Panel</button>
   
   <audio id="audio" autoplay playsinline muted style="display:none;"></audio>
   
@@ -251,6 +502,7 @@
       ws.onmessage = async (event) => {
         const data = JSON.parse(event.data);
         console.log("DEBUG: Browser received", data);
+        console.log("DEBUG: Message type:", data.type);
         if (data.type === "offer") {
           console.log("DEBUG: Received offer, setting remote description");
           await currentPC.setRemoteDescription({ type: "offer", sdp: data.sdp });
@@ -269,17 +521,14 @@
             console.error("DEBUG: Error adding candidate", err);
           }
         } else if (data.type === "control") {
-          const incomingDiv = document.getElementById("incoming-messages");
-          const msgDiv = document.createElement("div");
-          const content = data.controlString ? data.controlString : data.direction;
-          msgDiv.textContent = "Received control: " + content;
-          msgDiv.style.marginBottom = "4px";
-          msgDiv.style.padding = "2px 0";
-          msgDiv.style.borderBottom = "1px solid #eee";
-          incomingDiv.appendChild(msgDiv);
-          
-          // Auto-scroll to bottom
-          incomingDiv.scrollTop = incomingDiv.scrollHeight;
+          // Control messages are logged but not displayed (we show outgoing only)
+          console.log("DEBUG: Received control message:", data);
+        } else if (data.type === "telemetry") {
+          // Handle telemetry data from actuator
+          console.log("DEBUG: Received telemetry:", data.data);
+          console.log("DEBUG: Telemetry data type:", typeof data.data);
+          console.log("DEBUG: Telemetry data keys:", Object.keys(data.data));
+          handleTelemetry(data.data);
         }
       };
 
@@ -380,7 +629,12 @@
     }
 
     function updateControlDisplay() {
-      document.getElementById("control-string").textContent = getControlString();
+      const controlStr = getControlString();
+      const controlDisplay = document.getElementById("control-string");
+      const timestamp = new Date().toLocaleTimeString();
+      
+      // Show the current control string being sent
+      controlDisplay.textContent = `[${timestamp}] ${controlStr}`;
     }
 
     function sendControlString() {
@@ -411,7 +665,7 @@
     // Send out the control string at 20 Hz (every 50 ms)
     setInterval(sendControlString, 50);
     
-    // Chat toggle functionality
+    // Debug panel toggle functionality
     function toggleChat() {
       const chatSection = document.getElementById('chat-section');
       const toggleButton = document.getElementById('chat-toggle');
@@ -431,6 +685,193 @@
     // Add event listeners for both toggle buttons
     document.getElementById('chat-toggle').addEventListener('click', toggleChat);
     document.getElementById('floating-chat-toggle').addEventListener('click', toggleChat);
+    
+    // Update toggle labels when checkboxes change
+    document.getElementById('tune-motor-dir').addEventListener('change', function() {
+      document.getElementById('motor-dir-label').textContent = this.checked ? 'Inverted' : 'Normal';
+    });
+    
+    document.getElementById('tune-sensor-dir').addEventListener('change', function() {
+      document.getElementById('sensor-dir-label').textContent = this.checked ? 'Inverted' : 'Normal';
+    });
+    
+    // Function to send tuning commands
+    function sendTuningCommand(commandKey, valueType) {
+      let value;
+      let inputId;
+      
+      // Get the value based on command type
+      switch(commandKey) {
+        case 'tune_address':
+          inputId = 'tune-address';
+          break;
+        case 'tune_setpoint':
+          inputId = 'tune-setpoint';
+          break;
+        case 'tune_motor_dir':
+          inputId = 'tune-motor-dir';
+          break;
+        case 'tune_sensor_dir':
+          inputId = 'tune-sensor-dir';
+          break;
+        case 'tune_p':
+          inputId = 'tune-p';
+          break;
+        case 'tune_max_pwm':
+          inputId = 'tune-max-pwm';
+          break;
+        case 'tune_min_pwm':
+          inputId = 'tune-min-pwm';
+          break;
+        case 'tune_save':
+          value = 1;
+          break;
+      }
+      
+      // Get value from input
+      if (inputId) {
+        const input = document.getElementById(inputId);
+        if (valueType === 'boolean') {
+          value = input.checked ? 1 : 0;
+        } else if (valueType === 'float') {
+          value = parseFloat(input.value);
+          if (isNaN(value)) {
+            alert('Please enter a valid number');
+            return;
+          }
+        } else if (valueType === 'number') {
+          value = parseInt(input.value);
+          if (isNaN(value)) {
+            alert('Please enter a valid number');
+            return;
+          }
+        } else {
+          value = input.value;
+        }
+      }
+      
+      // Construct command string
+      const commandString = `${commandKey}=${value}`;
+      
+      // Send the command
+      if (globalWS && globalWS.readyState === WebSocket.OPEN) {
+        globalWS.send(JSON.stringify({ 
+          type: "control", 
+          controlString: commandString 
+        }));
+        
+        console.log(`✅ Sent tuning command: ${commandString}`);
+        
+        // Visual feedback - flash the button
+        const btn = event.target;
+        const originalBg = btn.style.backgroundColor;
+        btn.style.backgroundColor = '#27ae60';
+        btn.textContent = '✓ Sent';
+        setTimeout(() => {
+          btn.style.backgroundColor = originalBg;
+          btn.textContent = 'Send';
+        }, 1000);
+        
+        // Update control string display to show what was sent
+        const controlDisplay = document.getElementById('control-string');
+        const timestamp = new Date().toLocaleTimeString();
+        controlDisplay.textContent = `[${timestamp}] ${commandString}\n` + controlDisplay.textContent;
+        
+      } else {
+        alert('WebSocket not connected!');
+        console.error('Cannot send tuning command: WebSocket not connected');
+      }
+    }
+    
+    // Function to request telemetry from actuator
+    function retrieveTelemetry() {
+      const actuatorId = document.getElementById('actuator-id-select').value;
+      const statusDiv = document.getElementById('telemetry-status');
+      
+      if (globalWS && globalWS.readyState === WebSocket.OPEN) {
+        // Send telemetry request command
+        const commandString = `tune_request_telemetry=${actuatorId}`;
+        globalWS.send(JSON.stringify({ 
+          type: "control", 
+          controlString: commandString 
+        }));
+        
+        console.log(`✅ Requested telemetry from actuator ${actuatorId}`);
+        statusDiv.textContent = `⏳ Requesting telemetry from actuator ${actuatorId}...`;
+        statusDiv.style.color = '#3498db';
+        
+        // Set timeout in case no response
+        setTimeout(() => {
+          if (statusDiv.textContent.includes('Requesting')) {
+            statusDiv.textContent = '⚠️ No response from actuator. Check connection.';
+            statusDiv.style.color = '#e74c3c';
+          }
+        }, 3000);
+        
+      } else {
+        alert('WebSocket not connected!');
+        statusDiv.textContent = '❌ WebSocket not connected';
+        statusDiv.style.color = '#e74c3c';
+      }
+    }
+    
+    // Debug function to test telemetry handling (call from browser console)
+    window.testTelemetry = function() {
+      console.log('🧪 Testing telemetry handling...');
+      const testData = {
+        address: 512,
+        motor_dir: false,
+        sensor_dir: false,
+        max_pwm: 255,
+        min_pwm: 30,
+        setpoint: 0.0,
+        p_gain: 5.0
+      };
+      handleTelemetry(testData);
+    };
+
+    // Function to handle incoming telemetry data
+    function handleTelemetry(data) {
+      console.log('🎯 handleTelemetry called with:', data);
+      const statusDiv = document.getElementById('telemetry-status');
+      
+      console.log('📥 Processing telemetry:', data);
+      
+      // Populate the UI fields with received values
+      document.getElementById('tune-address').value = data.address;
+      document.getElementById('tune-setpoint').value = data.setpoint.toFixed(2);
+      document.getElementById('tune-motor-dir').checked = data.motor_dir;
+      document.getElementById('motor-dir-label').textContent = data.motor_dir ? 'Inverted' : 'Normal';
+      document.getElementById('tune-sensor-dir').checked = data.sensor_dir;
+      document.getElementById('sensor-dir-label').textContent = data.sensor_dir ? 'Inverted' : 'Normal';
+      document.getElementById('tune-p').value = data.p_gain.toFixed(3);
+      document.getElementById('tune-max-pwm').value = data.max_pwm;
+      document.getElementById('tune-min-pwm').value = data.min_pwm;
+      
+      // Update status
+      statusDiv.textContent = `✅ Loaded values from actuator 0x${data.address.toString(16).toUpperCase()}`;
+      statusDiv.style.color = '#27ae60';
+      
+      // Flash the input fields to show they've been updated
+      const inputs = [
+        'tune-address', 'tune-setpoint', 'tune-motor-dir', 'tune-sensor-dir',
+        'tune-p', 'tune-max-pwm', 'tune-min-pwm'
+      ];
+      
+      inputs.forEach(id => {
+        const elem = document.getElementById(id);
+        if (elem) {
+          const originalBg = elem.style.backgroundColor;
+          elem.style.backgroundColor = '#d5f4e6';
+          elem.style.transition = 'background-color 0.5s';
+          setTimeout(() => {
+            elem.style.backgroundColor = originalBg;
+          }, 1000);
+        }
+      });
+      
+      console.log('✅ Telemetry data loaded into UI');
+    }
   </script>
 </body>
 </html>
