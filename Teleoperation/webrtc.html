@@ -367,7 +367,7 @@
         
         <!-- Tuning Commands Section -->
         <div class="debug-section">
-          <div class="debug-section-title">⚙️ Wheel Actuator Tuning</div>
+          <div class="debug-section-title">⚙️ Actuator Tuning</div>
           
           <!-- Actuator Selection and Retrieve -->
           <div class="tuning-control" style="background: #e8f4f8; padding: 10px; border-radius: 5px; margin-bottom: 15px;">
@@ -375,10 +375,30 @@
             <div class="tuning-description">Choose actuator to configure (decimal address)</div>
             <div class="tuning-input-group">
               <select id="actuator-id-select" class="tuning-input" style="flex: 2;">
-                <option value="512">Wheel Actuator 1 (0x200 / 512)</option>
-                <option value="768">Wheel Actuator 2 (0x300 / 768)</option>
-                <option value="1024">Wheel Actuator 3 (0x400 / 1024)</option>
-                <option value="65535">All Actuators (Broadcast)</option>
+                <optgroup label="Wheel Actuators">
+                  <option value="512">Wheel Actuator 1 (0x200 / 512)</option>
+                  <option value="768">Wheel Actuator 2 (0x300 / 768)</option>
+                </optgroup>
+                <optgroup label="Neck Actuator">
+                  <option value="1280">Neck Actuator (0x500 / 1280)</option>
+                </optgroup>
+                <optgroup label="Joint Actuators (Arm)">
+                  <option value="1536">Joint 1 (0x600 / 1536)</option>
+                  <option value="1537">Joint 2 (0x601 / 1537)</option>
+                  <option value="1538">Joint 3 (0x602 / 1538)</option>
+                  <option value="1539">Joint 4 (0x603 / 1539)</option>
+                  <option value="1540">Joint 5 (0x604 / 1540)</option>
+                  <option value="1541">Joint 6 (0x605 / 1541)</option>
+                  <option value="1542">Joint 7 (0x606 / 1542)</option>
+                  <option value="1543">Joint 8 (0x607 / 1543)</option>
+                  <option value="1544">Joint 9 (0x608 / 1544)</option>
+                  <option value="1545">Joint 10 (0x609 / 1545)</option>
+                  <option value="1546">Joint 11 (0x60A / 1546)</option>
+                  <option value="1547">Joint 12 (0x60B / 1547)</option>
+                </optgroup>
+                <optgroup label="Broadcast">
+                  <option value="65535">All Actuators (0xFFFF)</option>
+                </optgroup>
               </select>
               <button class="tuning-btn" onclick="retrieveTelemetry()" style="background: #27ae60;">📥 Retrieve</button>
             </div>
@@ -837,28 +857,60 @@
       
       console.log('📥 Processing telemetry:', data);
       
+      // List of fields that will be updated
+      const updatedFields = [];
+      
       // Populate the UI fields with received values
-      document.getElementById('tune-address').value = data.address;
-      document.getElementById('tune-setpoint').value = data.setpoint.toFixed(2);
-      document.getElementById('tune-motor-dir').checked = data.motor_dir;
-      document.getElementById('motor-dir-label').textContent = data.motor_dir ? 'Inverted' : 'Normal';
-      document.getElementById('tune-sensor-dir').checked = data.sensor_dir;
-      document.getElementById('sensor-dir-label').textContent = data.sensor_dir ? 'Inverted' : 'Normal';
-      document.getElementById('tune-p').value = data.p_gain.toFixed(3);
-      document.getElementById('tune-max-pwm').value = data.max_pwm;
-      document.getElementById('tune-min-pwm').value = data.min_pwm;
+      // Address (always present)
+      if (data.address !== undefined) {
+        document.getElementById('tune-address').value = data.address;
+        updatedFields.push('tune-address');
+      }
+      
+      // Setpoint (wheel actuators only)
+      if (data.setpoint !== undefined) {
+        document.getElementById('tune-setpoint').value = data.setpoint.toFixed(2);
+        updatedFields.push('tune-setpoint');
+      }
+      
+      // Motor direction
+      if (data.motor_dir !== undefined) {
+        document.getElementById('tune-motor-dir').checked = data.motor_dir;
+        document.getElementById('motor-dir-label').textContent = data.motor_dir ? 'Inverted' : 'Normal';
+        updatedFields.push('tune-motor-dir');
+      }
+      
+      // Sensor direction (wheel actuators only)
+      if (data.sensor_dir !== undefined) {
+        document.getElementById('tune-sensor-dir').checked = data.sensor_dir;
+        document.getElementById('sensor-dir-label').textContent = data.sensor_dir ? 'Inverted' : 'Normal';
+        updatedFields.push('tune-sensor-dir');
+      }
+      
+      // P gain (wheel actuators only)
+      if (data.p_gain !== undefined) {
+        document.getElementById('tune-p').value = data.p_gain.toFixed(3);
+        updatedFields.push('tune-p');
+      }
+      
+      // Max PWM
+      if (data.max_pwm !== undefined) {
+        document.getElementById('tune-max-pwm').value = data.max_pwm;
+        updatedFields.push('tune-max-pwm');
+      }
+      
+      // Min PWM
+      if (data.min_pwm !== undefined) {
+        document.getElementById('tune-min-pwm').value = data.min_pwm;
+        updatedFields.push('tune-min-pwm');
+      }
       
       // Update status
       statusDiv.textContent = `✅ Loaded values from actuator 0x${data.address.toString(16).toUpperCase()}`;
       statusDiv.style.color = '#27ae60';
       
       // Flash the input fields to show they've been updated
-      const inputs = [
-        'tune-address', 'tune-setpoint', 'tune-motor-dir', 'tune-sensor-dir',
-        'tune-p', 'tune-max-pwm', 'tune-min-pwm'
-      ];
-      
-      inputs.forEach(id => {
+      updatedFields.forEach(id => {
         const elem = document.getElementById(id);
         if (elem) {
           const originalBg = elem.style.backgroundColor;

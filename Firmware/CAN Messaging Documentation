@@ -1,6 +1,7 @@
 CAN messages to Wheel Actuators 
 (String Motion commands: r2, l2, r, l, f, b for motion) 
-1. Actuator set point change (0 position change) - should be 0 be standard
+1. Address change
+2. Actuator set point change (0 position change) - should be 0 be standard
 2. Switch motor pins direction
 3. Switch sensor count direction
 4. Update P value

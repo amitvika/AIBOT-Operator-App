@@ -265,12 +265,16 @@ class RobotController:
                     
                     # Parse telemetry based on message ID
                     if msg.arbitration_id == TELEMETRY_RESPONSE_1:
-                        # Parse: address(2), motor_dir(1), sensor_dir(1), max_pwm(1), min_pwm(1)
+                        # Parse: address(2), motor_dir(1), sensor_dir(1), max_pwm(1), min_pwm(1), reserved(2)
                         address = struct.unpack('>H', bytes(msg.data[0:2]))[0]
                         motor_dir = bool(msg.data[2])
                         sensor_dir = bool(msg.data[3])
                         max_pwm = msg.data[4]
                         min_pwm = msg.data[5]
+                        
+                        # Check if this is a single-message telemetry (neck actuator)
+                        # Neck actuator sets bytes 6-7 to zero and doesn't send part 2
+                        is_single_message = (msg.data[6] == 0 and msg.data[7] == 0 and msg.data[3] == 0)
                         
                         # Store in buffer with timestamp
                         self.telemetry_buffer[address] = {
@@ -279,9 +283,36 @@ class RobotController:
                             'sensor_dir': sensor_dir,
                             'max_pwm': max_pwm,
                             'min_pwm': min_pwm,
-                            'timestamp': time.time()
+                            'timestamp': time.time(),
+                            'is_single_message': is_single_message
                         }
                         print(f"   Part 1: Addr={address}, MotorDir={motor_dir}, SensorDir={sensor_dir}, MaxPWM={max_pwm}, MinPWM={min_pwm}")
+                        
+                        # If this is a single-message telemetry, send it immediately
+                        if is_single_message:
+                            print(f"   Detected single-message telemetry (neck actuator)")
+                            telemetry_data = self.telemetry_buffer[address].copy()
+                            # Remove internal fields
+                            telemetry_data.pop('timestamp', None)
+                            telemetry_data.pop('is_single_message', None)
+                            
+                            # Send to WebSocket
+                            if self.ws:
+                                try:
+                                    telemetry_msg = {
+                                        'type': 'telemetry',
+                                        'data': telemetry_data
+                                    }
+                                    print(f"📤 Sending telemetry message: {json.dumps(telemetry_msg)}")
+                                    await self.ws.send(json.dumps(telemetry_msg))
+                                    print(f"✅ Forwarded complete telemetry for address 0x{address:03X}")
+                                except Exception as e:
+                                    print(f"❌ Failed to send telemetry to WebSocket: {e}")
+                            else:
+                                print("❌ No WebSocket connection available")
+                            
+                            # Clear from buffer
+                            del self.telemetry_buffer[address]
                         
                     elif msg.arbitration_id == TELEMETRY_RESPONSE_2:
                         # Parse: setpoint(4), p_gain(4)
@@ -299,9 +330,9 @@ class RobotController:
                             telemetry_data['setpoint'] = setpoint
                             telemetry_data['p_gain'] = p_gain
                             
-                            # Remove timestamp before sending
-                            if 'timestamp' in telemetry_data:
-                                del telemetry_data['timestamp']
+                            # Remove internal fields before sending
+                            telemetry_data.pop('timestamp', None)
+                            telemetry_data.pop('is_single_message', None)
                             
                             # Send complete telemetry to WebSocket
                             if self.ws:
